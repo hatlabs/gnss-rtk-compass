@@ -101,8 +101,13 @@ void setup() {
               [](const AttitudeVector& a) { return a.yaw; }))
           ->connect_to(std::make_shared<AngleCorrection>(0, 0,
                                                          "/Heading/Offset"));
-  heading_true->connect_to(std::make_shared<SKOutputFloat>(
-      "navigation.headingTrue", "/SK Path/Heading True", "rad"));
+  auto sk_heading = std::make_shared<SKOutputFloat>("navigation.headingTrue",
+                                                    "/SK Path/Heading True");
+  // set_metadata copies its argument, so a stack-local is safe (avoids `new`).
+  SKMetadata heading_meta("rad", "True Heading", "GNSS dual-antenna true heading",
+                          "Heading", 30);
+  sk_heading->set_metadata(&heading_meta);
+  heading_true->connect_to(sk_heading);
   heading_true->connect_to(&n2k->heading_);
 
   // The "/Heading/Offset" correction applies to the heading outputs above.
