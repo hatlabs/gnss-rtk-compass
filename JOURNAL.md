@@ -114,6 +114,29 @@
 - Verified on device: clean boot, no crash, HPR still parsed (parser alive).
   Flash 89.8%.
 
+### No-bus reboot + CAN spam fixed in the driver (2026-06-03)
+- Symptom: with no N2K bus, huge "CANSendFrame/CANGetFrame - not open" spam and
+  a reboot after a while.
+- Root cause (driver, mairas/NMEA2000_twai): no bus -> bus-off -> errorMonitorTask
+  reinits TWAI every ~2s. (1) per-call "not open" + per-cycle reinit logs flooded
+  the log; (2) the monitor task ran twai_driver_uninstall_v2() while the event
+  loop was inside twai_transmit/receive on the same handle (is_open_ checked
+  without a lock, cleared only after uninstall) -> use-after-free -> Guru
+  Meditation panic (rst:0xc SW_CPU_RESET, ~1/min).
+- Fix (fork branch fix/busoff-teardown-race, commit 03aa7d4): mutex guarding the
+  handle + is_open_ in CANSendFrame/CANGetFrame/CAN_init/CAN_deinit; clear
+  is_open_ before teardown; report "not open"/"bus-off" once at ERROR (re-armed
+  only on a received frame); silence per-cycle reinit logs. Reinit cadence
+  unchanged (every 2s) per decision.
+- Project pinned to the local fork via symlink in platformio.ini (temporary,
+  until the fork branch is merged; then restore a repo URL and delete the
+  dangling NMEA2000_twai dir at the workspace root).
+- Verified on bench (no bus, 150s): 0 panics (was ~1/min); CAN logs down from
+  thousands to ~5 (1 not-open + 1 startup init + 3x the pre-existing 1/min
+  bus-off heartbeat). Device runs as a Signal-K-only compass with no N2K.
+- BONUS: real heading observed this session -- $GNHPR quality 5 (RTK float),
+  heading ~309 deg, 15 sats. The HPR parser works end-to-end on live data.
+
 ### Still TODO
 - Implement HPR parser ($GNHPR -> RTKData -> SK headingTrue/attitude) and
   N2K senders (Phase: implement). HPR field order confirmed from live data and
