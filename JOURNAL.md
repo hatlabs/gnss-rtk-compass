@@ -45,7 +45,29 @@
   attitude; (2) NMEA 2000 senders (127250, 127257, 129025, 129026, 129029)
   ported to SensESP 3.x API; (3) build + flash + bench test.
 
+### Build + hardware bring-up (2026-06-03, same day)
+- Build blocked by a SensESP 3.3.0 bug: StreamLineProducer::receive_line()
+  calls `emit(buf_)` with buf_ a unique_ptr<char[]> where emit wants const
+  String&. New file in 3.3.0, never compiled (no example exercises it).
+  NMEA0183 3.1.1 hard-depends on StreamLineProducer, so no published version
+  combo builds. Fix: `emit(String(buf_.get()))`. Verified the fix compiles.
+  Decision: fix upstream in SignalK/SensESP and release 3.3.1 (PR opened).
+- Fixed our own main.cpp: published NMEA0183 3.1.1 class is NMEA0183IOTask,
+  not NMEA0183IO (ref/NMEA0183 is a newer diverged copy).
+- Flash 86.8% (1.71 MB) on min_spiffs — watch headroom as N2K senders land.
+- Flashed to /dev/cu.usbserial-2010. Serial capture CONFIRMS hardware:
+  $GNHPR at ~10 Hz + $GNGGA/$GNRMC at 1 Hz — the exact rates we configured,
+  proving both RX (GPIO21) and TX (GPIO18, module accepted MODE HEADING2 +
+  log config) are wired correctly. All fields zero / QF=0 / 0 sats: no
+  satellite fix yet (antennas need open sky). Link + config fully validated.
+- Stale SK server config on device points at oppi4.hal:3000 (doesn't resolve).
+  WiFi is up. Repoint to halos.hurma via the web UI later. Not a code issue.
+- Added a TEMP raw-line logger to main.cpp for bring-up; remove before finalize.
+
 ### Still TODO
-- Implement HPR parser and N2K senders (Phase: implement).
-- Build/flash/monitor verification (build-flash).
+- Implement HPR parser ($GNHPR -> RTKData -> SK headingTrue/attitude) and
+  N2K senders (Phase: implement). HPR field order confirmed from live data and
+  manual: utc, heading, pitch, roll, QF, sats, ... (QF 4=fix,5=float,1=single).
+- Repoint SK server to halos.hurma; outdoor fix test for real heading.
+- Remove TEMP raw-line logger.
 - Review before finalizing.

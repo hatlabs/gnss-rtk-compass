@@ -7,6 +7,7 @@
 #include <memory>
 
 #include "sensesp.h"
+#include "sensesp/system/lambda_consumer.h"
 #include "sensesp_app_builder.h"
 #include "sensesp_nmea0183/nmea0183.h"
 #include "sensesp_nmea0183/wiring.h"
@@ -21,7 +22,7 @@ constexpr int kUM982ResetPin = 26;
 constexpr int kUM982PPSPin = 27;
 constexpr uint32_t kUM982BaudRate = 115200;
 
-std::shared_ptr<NMEA0183IO> nmea_io;
+std::shared_ptr<NMEA0183IOTask> nmea_io;
 
 // Put the UM982 into dual-antenna heading mode and enable the NMEA sentences
 // we consume. Sent on every boot so the module is self-configuring after a
@@ -56,7 +57,14 @@ void setup() {
 
   ConfigureUM982(&Serial2);
 
-  nmea_io = std::make_shared<NMEA0183IO>(&Serial2);
+  nmea_io = std::make_shared<NMEA0183IOTask>(&Serial2);
+
+  // TEMP (hardware bring-up): log every raw line received from the UM982 so we
+  // can confirm wiring and baud rate before relying on the parsers.
+  nmea_io->line_producer_->connect_to(
+      new LambdaConsumer<String>([](const String& line) {
+        ESP_LOGI("UM982", "RX: %s", line.c_str());
+      }));
 
   // Standard GNSS sentences: position, SOG, COG, satellites, fix quality.
   ConnectGNSS(&nmea_io->parser_, new GNSSData());
