@@ -58,6 +58,7 @@ void EnableUM982Output() {
   nmea_io->set("GPGGA 1");    // position, fix quality, satellites at 1 Hz
   nmea_io->set("GPRMC 1");    // position, SOG, time at 1 Hz
   nmea_io->set("GPVTG 1");    // course over ground at 1 Hz
+  nmea_io->set("GPGSV 1");    // satellites in view (constellation) at 1 Hz
 }
 
 // Wire the data path. Called only after all UM982 settings are ACK'd, so
@@ -98,6 +99,7 @@ void WireOutputs() {
   gnss_data->num_satellites.connect_to(&n2k->num_satellites_);
   gnss_data->horizontal_dilution.connect_to(&n2k->hdop_);
   gnss_data->datetime.connect_to(&n2k->datetime_);
+  gnss_data->satellites.connect_to(&n2k->satellites_);
 
   EnableUM982Output();
   ESP_LOGI("UM982cfg", "Configuration complete; outputs enabled");

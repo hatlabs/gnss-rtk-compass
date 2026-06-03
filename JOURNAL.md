@@ -183,6 +183,19 @@
 - Flash now 90.4% on min_spiffs (4MB board) -- headroom getting tight before
   Stage 2 (constellation) lands.
 
+### Stage 2: constellation output (2026-06-03)
+- Enabled GPGSV on the UM982. ConnectGNSS already wires GSV ->
+  navigation.gnss.satellitesInView, so the SK side is automatic.
+- N2K: added PGN 129540 (GNSS sats in view) built from gnss_data.satellites
+  (PRN=id, elevation/azimuth deg->rad, SNR, usage=NotTracked) and PGN 129539
+  (DOP, HDOP only -- ConnectGNSS doesn't expose V/TDOP; no GSA wiring).
+- gnss_data.satellites wired to a new N2kSenders.satellites_ consumer.
+- Verified: builds, clean boot, config completes, no crash from the new
+  senders. Flash 90.7%. SK satellitesInView / N2K 129540+129539 on-the-wire
+  output still needs an SK server / N2K bus to confirm.
+- Flash headroom now 90.7% on min_spiffs (4MB). Should address partitioning or
+  trim before adding much more.
+
 ### Still TODO
 - Implement HPR parser ($GNHPR -> RTKData -> SK headingTrue/attitude) and
   N2K senders (Phase: implement). HPR field order confirmed from live data and

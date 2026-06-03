@@ -2,9 +2,12 @@
 
 #include <NMEA2000.h>
 
+#include <vector>
+
 #include "sensesp/system/expiring_value.h"
 #include "sensesp/system/lambda_consumer.h"
 #include "sensesp/types/position.h"
+#include "sensesp_nmea0183/data/gnss_data.h"
 
 namespace gnss_rtk_compass {
 
@@ -33,6 +36,7 @@ class N2kSenders {
   LambdaConsumer<int> num_satellites_;
   LambdaConsumer<float> hdop_;
   LambdaConsumer<time_t> datetime_;
+  LambdaConsumer<std::vector<nmea0183::GNSSSatellite>> satellites_;
 
  private:
   ExpiringValue<double> heading_v_;
@@ -43,6 +47,7 @@ class N2kSenders {
   ExpiringValue<int> num_satellites_v_;
   ExpiringValue<double> hdop_v_;
   ExpiringValue<time_t> datetime_v_;
+  ExpiringValue<std::vector<nmea0183::GNSSSatellite>> satellites_v_;
 };
 
 }  // namespace gnss_rtk_compass

@@ -36,6 +36,9 @@ N2kSenders::N2kSenders(uint8_t source_address)
       num_satellites_([this](int v) { num_satellites_v_.update(v); }),
       hdop_([this](float v) { hdop_v_.update(v); }),
       datetime_([this](time_t v) { datetime_v_.update(v); }),
+      satellites_([this](const std::vector<nmea0183::GNSSSatellite>& v) {
+        satellites_v_.update(v);
+      }),
       heading_v_(N2kDoubleNA, kExpiry, N2kDoubleNA),
       attitude_v_(AttitudeVector(N2kDoubleNA, N2kDoubleNA, N2kDoubleNA), kExpiry,
                   AttitudeVector(N2kDoubleNA, N2kDoubleNA, N2kDoubleNA)),
@@ -45,7 +48,8 @@ N2kSenders::N2kSenders(uint8_t source_address)
       sog_v_(N2kDoubleNA, kExpiry, N2kDoubleNA),
       num_satellites_v_(0, kExpiry, 0),
       hdop_v_(N2kDoubleNA, kExpiry, N2kDoubleNA),
-      datetime_v_(0, kExpiry, 0) {
+      datetime_v_(0, kExpiry, 0),
+      satellites_v_({}, kExpiry, {}) {
   nmea2000 = std::make_shared<tNMEA2000_esp32>(kCanTxPin, kCanRxPin);
 
   nmea2000->SetProductInformation("00000001", 130, "GNSS RTK Compass", "1.0",
@@ -103,6 +107,34 @@ N2kSenders::N2kSenders(uint8_t source_address)
                p.latitude, p.longitude, altitude, N2kGNSSt_GPS,
                have_fix ? N2kGNSSm_GNSSfix : N2kGNSSm_noGNSS,
                num_satellites_v_.get(), hdop_v_.get());
+    nmea2000->SendMsg(msg);
+  });
+
+  // PGN 129539 GNSS DOP (HDOP only; the GNSS sentences don't expose V/TDOP).
+  loop->onRepeat(1000, [this]() {
+    tN2kMsg msg;
+    SetN2kPGN129539(msg, kSID, N2kGNSSdm_Auto, N2kGNSSdm_3D, hdop_v_.get(),
+                    N2kDoubleNA, N2kDoubleNA);
+    nmea2000->SendMsg(msg);
+  });
+
+  // PGN 129540 GNSS Satellites in View.
+  loop->onRepeat(1000, [this]() {
+    auto satellites = satellites_v_.get();
+    tN2kMsg msg;
+    SetN2kPGN129540(msg, kSID, N2kDD072_Unavailable);
+    for (const auto& s : satellites) {
+      tSatelliteInfo info;
+      info.PRN = s.id;
+      info.Elevation =
+          s.elevation.is_valid() ? (double)s.elevation * DEG_TO_RAD : N2kDoubleNA;
+      info.Azimuth =
+          s.azimuth.is_valid() ? (double)s.azimuth * DEG_TO_RAD : N2kDoubleNA;
+      info.SNR = s.snr;
+      info.RangeResiduals = N2kDoubleNA;
+      info.UsageStatus = N2kDD124_NotTracked;
+      AppendN2kPGN129540(msg, info);
+    }
     nmea2000->SendMsg(msg);
   });
 }
