@@ -4,10 +4,6 @@
 
 #include <functional>
 
-#include "sensesp/signalk/signalk_output.h"
-#include "sensesp/signalk/signalk_types.h"
-#include "sensesp/transforms/angle_correction.h"
-#include "sensesp/transforms/lambda_transform.h"
 #include "sensesp_nmea0183/sentence_parser/field_parsers.h"
 
 namespace gnss_rtk_compass {
@@ -65,25 +61,6 @@ bool UnicoreHPRSentenceParser::parse_fields(const char* field_strings,
   }
 
   return true;
-}
-
-void ConnectUM982Heading(NMEA0183Parser* nmea_input) {
-  auto* hpr = new UnicoreHPRSentenceParser(nmea_input);
-
-  hpr->attitude_
-      .connect_to(new LambdaTransform<AttitudeVector, float>(
-          [](const AttitudeVector& a) { return a.yaw; }))
-      ->connect_to(new AngleCorrection(0, 0, "/Heading/Offset"))
-      ->connect_to(new SKOutputFloat(
-          "navigation.headingTrue", "/SK Path/Heading True",
-          new SKMetadata("rad", "True Heading",
-                         "GNSS dual-antenna true heading", "Heading", 30)));
-
-  hpr->attitude_.connect_to(new SKOutputAttitudeVector("navigation.attitude",
-                                                       "/SK Path/Attitude"));
-
-  hpr->heading_quality_.connect_to(new SKOutputString(
-      "navigation.gnss.headingQuality", "/SK Path/Heading Quality"));
 }
 
 }  // namespace gnss_rtk_compass

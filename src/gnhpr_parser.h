@@ -32,9 +32,4 @@ class UnicoreHPRSentenceParser : public SentenceParser {
   ObservableValue<int> num_satellites_;
 };
 
-/**
- * @brief Wire a UM982 HPR parser to Signal K heading and attitude outputs.
- */
-void ConnectUM982Heading(NMEA0183Parser* nmea_input);
-
 }  // namespace gnss_rtk_compass

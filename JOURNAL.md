@@ -81,6 +81,24 @@
   (gating correct). Flash now 87.5%.
 - NOT YET VERIFIED: actual heading values — needs outdoor satellite fix (QF>=4).
 
+### NMEA 2000 senders implemented (2026-06-03)
+- Refactored: all SK+N2K wiring now in main.cpp (removed ConnectUM982Heading
+  helper); gnhpr_parser is parser-only. main keeps GNSSData + HPR parser handles
+  and fans out a single corrected true-heading value to both SK and N2K.
+- Added src/n2k_senders.{h,cpp}: N2kSenders inits tNMEA2000_esp32 on the
+  SH-ESP32 CAN pins (TX GPIO32 / RX GPIO34), NodeOnly, source address 25.
+  Periodic senders: 127250 heading (100ms), 127257 attitude (100ms), 129025
+  position (250ms), 129026 COG/SOG (250ms), 129029 GNSS data (1s). Inputs via
+  ExpiringValue (2s) so stale data sends as N2k-NA, not frozen.
+- Enabled GPVTG on the UM982 (COG in GNSSData comes from VTG, not RMC).
+- Verified on device: clean boot, no crash. TWAI driver starts. With NO bus
+  attached it enters expected bus-error recovery loop ("CANSendFrame - not
+  open" spam) because CAN needs another node to ACK. GNSS/HPR path unaffected.
+- Flash now 89.5% (1.76MB / 1.97MB app partition on min_spiffs). Headroom
+  tightening on this 4MB board; watch it.
+- NOT YET VERIFIED: actual PGN transmission — needs the N2K backbone + analyzer
+  or plotter. Heading/attitude values also still need an outdoor fix.
+
 ### Still TODO
 - Implement HPR parser ($GNHPR -> RTKData -> SK headingTrue/attitude) and
   N2K senders (Phase: implement). HPR field order confirmed from live data and

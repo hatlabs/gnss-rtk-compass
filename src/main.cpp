@@ -1,18 +1,23 @@
 // GNSS RTK Compass — UM982 dual-antenna satellite compass on SH-ESP32.
 //
 // Reads the UM982 serial output, derives true heading from the antenna
-// baseline, and publishes heading, position, speed/course and fix quality to
-// Signal K (and, once implemented, NMEA 2000). See SPEC.md.
+// baseline, and publishes heading, attitude, position, speed/course and fix
+// quality to both Signal K and NMEA 2000. See SPEC.md.
 
 #include <memory>
 
 #include "sensesp.h"
+#include "sensesp/signalk/signalk_output.h"
+#include "sensesp/signalk/signalk_types.h"
 #include "sensesp/system/lambda_consumer.h"
+#include "sensesp/transforms/angle_correction.h"
+#include "sensesp/transforms/lambda_transform.h"
 #include "sensesp_app_builder.h"
 #include "sensesp_nmea0183/nmea0183.h"
 #include "sensesp_nmea0183/wiring.h"
 
 #include "gnhpr_parser.h"
+#include "n2k_senders.h"
 
 using namespace sensesp;
 using namespace sensesp::nmea0183;
@@ -24,6 +29,9 @@ constexpr int kUM982ResetPin = 26;
 constexpr int kUM982PPSPin = 27;
 constexpr uint32_t kUM982BaudRate = 115200;
 
+// Unique address on the NMEA 2000 bus (see SPEC.md).
+constexpr uint8_t kN2kSourceAddress = 25;
+
 std::shared_ptr<NMEA0183IOTask> nmea_io;
 
 // Put the UM982 into dual-antenna heading mode and enable the NMEA sentences
@@ -34,7 +42,8 @@ void ConfigureUM982(Stream* stream) {
       "MODE HEADING2 FIXLENGTH",  // dual-antenna heading, fixed baseline
       "GPHPR 0.1",                // heading/pitch/roll/quality at 10 Hz
       "GPGGA 1",                  // position, fix quality, satellites at 1 Hz
-      "GPRMC 1",                  // position, SOG, COG, time at 1 Hz
+      "GPRMC 1",                  // position, SOG, time at 1 Hz
+      "GPVTG 1",                  // course over ground at 1 Hz
       "SAVECONFIG",
   };
   for (const char* command : commands) {
@@ -61,21 +70,50 @@ void setup() {
 
   nmea_io = std::make_shared<NMEA0183IOTask>(&Serial2);
 
-  // TEMP (hardware bring-up): log every raw line received from the UM982 so we
-  // can confirm wiring and baud rate before relying on the parsers.
+  // TEMP (hardware bring-up): log every raw line received from the UM982.
   nmea_io->line_producer_->connect_to(
       new LambdaConsumer<String>([](const String& line) {
         ESP_LOGI("UM982", "RX: %s", line.c_str());
       }));
 
-  // Standard GNSS sentences: position, SOG, COG, satellites, fix quality.
-  ConnectGNSS(&nmea_io->parser_, new GNSSData());
+  auto* parser = &nmea_io->parser_;
+
+  // Standard GNSS sentences -> Signal K (position, SOG, COG, sats, quality).
+  auto* gnss_data = new GNSSData();
+  ConnectGNSS(parser, gnss_data);
 
   // Dual-antenna heading/attitude from the UM982 $GNHPR sentence.
-  gnss_rtk_compass::ConnectUM982Heading(&nmea_io->parser_);
+  auto* hpr = new gnss_rtk_compass::UnicoreHPRSentenceParser(parser);
 
-  // TODO(SPEC.md): NMEA 2000 senders for PGNs 127250, 127257, 129025, 129026,
-  // 129029. Port the sender pattern to the SensESP 3.x API.
+  auto* n2k = new gnss_rtk_compass::N2kSenders(kN2kSourceAddress);
+
+  // True heading: a single corrected value feeds both Signal K and NMEA 2000.
+  auto* heading_true =
+      hpr->attitude_
+          .connect_to(new LambdaTransform<AttitudeVector, float>(
+              [](const AttitudeVector& a) { return a.yaw; }))
+          ->connect_to(new AngleCorrection(0, 0, "/Heading/Offset"));
+  heading_true->connect_to(new SKOutputFloat(
+      "navigation.headingTrue", "/SK Path/Heading True",
+      new SKMetadata("rad", "True Heading", "GNSS dual-antenna true heading",
+                     "Heading", 30)));
+  heading_true->connect_to(&n2k->heading_);
+
+  hpr->attitude_.connect_to(
+      new SKOutputAttitudeVector("navigation.attitude", "/SK Path/Attitude"));
+  hpr->attitude_.connect_to(&n2k->attitude_);
+
+  hpr->heading_quality_.connect_to(new SKOutputString(
+      "navigation.gnss.headingQuality", "/SK Path/Heading Quality"));
+
+  // NMEA 2000 position/COG/SOG/GNSS inputs (Signal K outputs are wired by
+  // ConnectGNSS above).
+  gnss_data->position.connect_to(&n2k->position_);
+  gnss_data->true_course.connect_to(&n2k->cog_);
+  gnss_data->speed.connect_to(&n2k->sog_);
+  gnss_data->num_satellites.connect_to(&n2k->num_satellites_);
+  gnss_data->horizontal_dilution.connect_to(&n2k->hdop_);
+  gnss_data->datetime.connect_to(&n2k->datetime_);
 }
 
 void loop() { event_loop()->tick(); }
