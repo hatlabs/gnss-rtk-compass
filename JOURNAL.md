@@ -156,6 +156,31 @@
   no ConfigSchema(SKOutput<T>&), so ConfigItem can't render it. A small
   templated ConfigSchema overload in SignalK/SensESP would restore it.
 
+### Stage 1: UM982 device-settings config cards (2026-06-03) — BUILDS, NOT YET HW-VERIFIED
+- Followed the wind-interface pattern (ref/HALSER-wind-interface/src/autonnic_config.h):
+  device settings on config cards that push commands to the module.
+- src/um982_config.h: UM982CommandAckParser (parses "$command,<cmd>,response:
+  OK"); UM982Setting<T> (FileSystemSaveable+Serializable, holds value+builder+
+  schema; save() persists + sends + waits ACK via SemaphoreValue = live apply);
+  command builders for mode/antijam/antispoof/baseline/offset/smoothing.
+- main.cpp restructured: ACK-gated boot sequencer (ApplyBootConfig) sends each
+  setting, waits for ACK, retries indefinitely; only when ALL ACK'd does
+  WireOutputs() run (ConnectGNSS, HPR->SK/N2K, N2kSenders) and enable the
+  output logs. So no deltas/N2K before the module is configured (per request).
+- Heading offset MOVED to the module (CONFIG HEADING OFFSET); removed the
+  SensESP AngleCorrection and /Heading/Offset card.
+- Six config cards exposed under /UM982/* (mode, baseline, offset, antijam,
+  antispoof, smoothing); N2K source address card retained.
+- All default commands are valid/ACK-able (FIXLENGTH, LENGTH 0, OFFSET 0,
+  ANTIJAM AUTO, ANTISPOOF DISABLE, SMOOTH HEADING 0).
+- RISK / TODO before trusting on hardware: only MODE HEADING2 is confirmed to
+  ACK with "response: OK". If CONFIG ANTIJAM/ANTISPOOF/HEADING/OFFSET/SMOOTH do
+  NOT ACK that way, the boot gate hangs and the device stays dark forever.
+  MUST capture boot serial on-device to confirm each command ACKs; if some
+  don't, send those fire-and-forget or match their actual response.
+- Flash now 90.4% on min_spiffs (4MB board) -- headroom getting tight before
+  Stage 2 (constellation) lands.
+
 ### Still TODO
 - Implement HPR parser ($GNHPR -> RTKData -> SK headingTrue/attitude) and
   N2K senders (Phase: implement). HPR field order confirmed from live data and

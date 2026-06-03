@@ -3,14 +3,18 @@
 // Reads the UM982 serial output, derives true heading from the antenna
 // baseline, and publishes heading, attitude, position, speed/course and fix
 // quality to both Signal K and NMEA 2000. See SPEC.md.
+//
+// Boot order matters: the UM982 settings (mode, baseline, offset, anti-jam,
+// anti-spoof, smoothing) are applied and ACK-confirmed before any output is
+// wired, so no heading/position is published until the module is configured.
 
 #include <memory>
+#include <vector>
 
 #include "sensesp.h"
 #include "sensesp/signalk/signalk_output.h"
 #include "sensesp/signalk/signalk_types.h"
 #include "sensesp/system/lambda_consumer.h"
-#include "sensesp/transforms/angle_correction.h"
 #include "sensesp/transforms/lambda_transform.h"
 #include "sensesp/ui/config_item.h"
 #include "sensesp/ui/ui_controls.h"
@@ -20,9 +24,11 @@
 
 #include "gnhpr_parser.h"
 #include "n2k_senders.h"
+#include "um982_config.h"
 
 using namespace sensesp;
 using namespace sensesp::nmea0183;
+using namespace gnss_rtk_compass;
 
 // UM982 UART, ESP32 side. RX21 <- UM982 TXD, TX18 -> UM982 RXD.
 constexpr int kUM982RxPin = 21;
@@ -31,34 +37,93 @@ constexpr int kUM982ResetPin = 26;
 constexpr int kUM982PPSPin = 27;
 constexpr uint32_t kUM982BaudRate = 115200;
 
-// Unique address on the NMEA 2000 bus (see SPEC.md).
 constexpr uint8_t kN2kSourceAddress = 25;
 
-// Held for the program lifetime: the NMEA 0183 parser registers sentence
-// parsers by raw pointer and ConnectGNSS references the GNSSData by raw
-// pointer, so these roots must not be destroyed.
+// Program-lifetime roots (registered by raw pointer elsewhere).
 std::shared_ptr<NMEA0183IOTask> nmea_io;
+std::shared_ptr<UM982CommandAckParser> ack_parser;
+std::shared_ptr<NumberConfig> n2k_address;
+std::vector<std::shared_ptr<UM982SettingBase>> um982_settings;
 std::shared_ptr<GNSSData> gnss_data;
-std::shared_ptr<gnss_rtk_compass::UnicoreHPRSentenceParser> hpr;
-std::shared_ptr<gnss_rtk_compass::N2kSenders> n2k;
+std::shared_ptr<UnicoreHPRSentenceParser> hpr;
+std::shared_ptr<N2kSenders> n2k;
 
-// Put the UM982 into dual-antenna heading mode and enable the NMEA sentences
-// we consume. Sent on every boot so the module is self-configuring after a
-// power loss or replacement. Period argument is in seconds (0.1 = 10 Hz).
-void ConfigureUM982(Stream* stream) {
-  static const char* commands[] = {
-      "MODE HEADING2 FIXLENGTH",  // dual-antenna heading, fixed baseline
-      "GPHPR 0.1",                // heading/pitch/roll/quality at 10 Hz
-      "GPGGA 1",                  // position, fix quality, satellites at 1 Hz
-      "GPRMC 1",                  // position, SOG, time at 1 Hz
-      "GPVTG 1",                  // course over ground at 1 Hz
-  };
-  // Config is reapplied on every boot, so it is not persisted with SAVECONFIG
-  // (which would wear the module's flash).
-  for (const char* command : commands) {
-    stream->printf("%s\r\n", command);
-    delay(100);
+// Boot-config ACK state (set from the NMEA task, read from the event loop).
+volatile bool ack_received = false;
+volatile bool ack_ok = false;
+
+// Enable the NMEA output sentences once the module is configured. Period
+// argument is in seconds (0.1 = 10 Hz).
+void EnableUM982Output() {
+  nmea_io->set("GPHPR 0.1");  // heading/pitch/roll/quality at 10 Hz
+  nmea_io->set("GPGGA 1");    // position, fix quality, satellites at 1 Hz
+  nmea_io->set("GPRMC 1");    // position, SOG, time at 1 Hz
+  nmea_io->set("GPVTG 1");    // course over ground at 1 Hz
+}
+
+// Wire the data path. Called only after all UM982 settings are ACK'd, so
+// nothing is published before the module is configured.
+void WireOutputs() {
+  auto* parser = &nmea_io->parser_;
+
+  gnss_data = std::make_shared<GNSSData>();
+  ConnectGNSS(parser, gnss_data.get());
+
+  hpr = std::make_shared<UnicoreHPRSentenceParser>(parser);
+  n2k = std::make_shared<N2kSenders>(
+      static_cast<uint8_t>(n2k_address->get_value()));
+
+  // True heading (already offset-corrected on the module) feeds SK and N2K.
+  auto yaw = std::make_shared<LambdaTransform<AttitudeVector, float>>(
+      [](const AttitudeVector& a) { return a.yaw; });
+  hpr->attitude_.connect_to(yaw);
+
+  auto sk_heading = std::make_shared<SKOutputFloat>("navigation.headingTrue",
+                                                    "/SK Path/Heading True");
+  SKMetadata heading_meta("rad", "True Heading", "GNSS dual-antenna true heading",
+                          "Heading", 30);
+  sk_heading->set_metadata(&heading_meta);
+  yaw->connect_to(sk_heading);
+  yaw->connect_to(&n2k->heading_);
+
+  hpr->attitude_.connect_to(std::make_shared<SKOutputAttitudeVector>(
+      "navigation.attitude", "/SK Path/Attitude"));
+  hpr->attitude_.connect_to(&n2k->attitude_);
+
+  hpr->heading_quality_.connect_to(std::make_shared<SKOutputString>(
+      "navigation.gnss.headingQuality", "/SK Path/Heading Quality"));
+
+  gnss_data->position.connect_to(&n2k->position_);
+  gnss_data->true_course.connect_to(&n2k->cog_);
+  gnss_data->speed.connect_to(&n2k->sog_);
+  gnss_data->num_satellites.connect_to(&n2k->num_satellites_);
+  gnss_data->horizontal_dilution.connect_to(&n2k->hdop_);
+  gnss_data->datetime.connect_to(&n2k->datetime_);
+
+  EnableUM982Output();
+  ESP_LOGI("UM982cfg", "Configuration complete; outputs enabled");
+}
+
+// Apply UM982 settings one at a time, waiting for each ACK. Retries
+// indefinitely so a slow-booting or briefly-absent module self-heals; outputs
+// stay dark until every setting is confirmed.
+void ApplyBootConfig(size_t index) {
+  if (index >= um982_settings.size()) {
+    WireOutputs();
+    return;
   }
+  String command = um982_settings[index]->command();
+  ack_received = false;
+  nmea_io->set(command);
+  ESP_LOGI("UM982cfg", "Applying: %s", command.c_str());
+  event_loop()->onDelay(2000, [index, command]() {
+    if (ack_received && ack_ok) {
+      ApplyBootConfig(index + 1);
+    } else {
+      ESP_LOGW("UM982cfg", "No ACK for '%s', retrying", command.c_str());
+      ApplyBootConfig(index);
+    }
+  });
 }
 
 void setup() {
@@ -75,85 +140,100 @@ void setup() {
                     ->enable_ota("thisisfine")
                     ->get_app();
 
-  ConfigureUM982(&Serial2);
-
   nmea_io = std::make_shared<NMEA0183IOTask>(&Serial2);
+  ack_parser = std::make_shared<UM982CommandAckParser>(&nmea_io->parser_);
+  ack_parser->connect_to(std::make_shared<LambdaConsumer<bool>>([](bool ok) {
+    ack_ok = ok;
+    ack_received = true;
+  }));
 
-  // TEMP (hardware bring-up): log every raw line received from the UM982.
-  nmea_io->line_producer_->connect_to(
-      std::make_shared<LambdaConsumer<String>>([](const String& line) {
-        ESP_LOGI("UM982", "RX: %s", line.c_str());
-      }));
+  // UM982 device settings, configurable from the web UI. Each save() sends the
+  // command and waits for the module ACK; the boot sequence applies them all.
+  auto* io = nmea_io.get();
+  auto* ack = ack_parser.get();
 
-  auto* parser = &nmea_io->parser_;
+  auto mode_config = std::make_shared<UM982Setting<String>>(
+      io, ack, String("FIXLENGTH"), UM982HeadingModeCommand, "mode",
+      R"JSON({"type":"object","properties":{"mode":{"title":"Heading mode","type":"string","enum":["FIXLENGTH","VARIABLELENGTH","STATIC","LOWDYNAMIC","TRACTOR"]}}})JSON",
+      "/UM982/Heading Mode");
+  ConfigItem(mode_config)
+      ->set_title("Heading mode")
+      ->set_description(
+          "Dual-antenna heading mode. FIXLENGTH suits a rigid, fixed antenna "
+          "baseline (the usual boat install).")
+      ->set_sort_order(100);
 
-  // Standard GNSS sentences -> Signal K (position, SOG, COG, sats, quality).
-  gnss_data = std::make_shared<GNSSData>();
-  ConnectGNSS(parser, gnss_data.get());
+  auto baseline_config = std::make_shared<UM982Setting<float>>(
+      io, ack, 0.0f, UM982BaselineLengthCommand, "length_cm",
+      R"JSON({"type":"object","properties":{"length_cm":{"title":"Baseline length (cm, 0 = auto)","type":"number"}}})JSON",
+      "/UM982/Baseline Length");
+  ConfigItem(baseline_config)
+      ->set_title("Antenna baseline length")
+      ->set_description(
+          "Fixed distance between the two antennas, in cm, to speed up and "
+          "stabilise the heading solution. 0 lets the module estimate it.")
+      ->set_sort_order(110);
 
-  // Dual-antenna heading/attitude from the UM982 $GNHPR sentence.
-  hpr = std::make_shared<gnss_rtk_compass::UnicoreHPRSentenceParser>(parser);
+  auto offset_config = std::make_shared<UM982Setting<float>>(
+      io, ack, 0.0f, UM982HeadingOffsetCommand, "offset_deg",
+      R"JSON({"type":"object","properties":{"offset_deg":{"title":"Heading offset (degrees)","type":"number"}}})JSON",
+      "/UM982/Heading Offset");
+  ConfigItem(offset_config)
+      ->set_title("Heading offset")
+      ->set_description(
+          "Correction added on the module to the GNSS heading, in degrees "
+          "(-180..180), to align the antenna baseline with the vessel heading.")
+      ->set_sort_order(120);
 
-  // N2K source address, configurable in the web UI. Applied at startup, so a
-  // change needs a restart.
+  auto antijam_config = std::make_shared<UM982Setting<String>>(
+      io, ack, String("AUTO"), UM982AntiJamCommand, "antijam",
+      R"JSON({"type":"object","properties":{"antijam":{"title":"Anti-jamming","type":"string","enum":["DISABLE","AUTO","FORCE"]}}})JSON",
+      "/UM982/Anti-Jamming");
+  ConfigItem(antijam_config)
+      ->set_title("Anti-jamming")
+      ->set_description(
+          "GNSS anti-jamming mode. AUTO is the default; FORCE always on "
+          "(higher power draw).")
+      ->set_sort_order(130);
+
+  auto antispoof_config = std::make_shared<UM982Setting<String>>(
+      io, ack, String("DISABLE"), UM982AntiSpoofCommand, "antispoof",
+      R"JSON({"type":"object","properties":{"antispoof":{"title":"Anti-spoofing","type":"string","enum":["DISABLE","ENABLE"]}}})JSON",
+      "/UM982/Anti-Spoofing");
+  ConfigItem(antispoof_config)
+      ->set_title("Anti-spoofing")
+      ->set_description("GNSS anti-spoofing protection.")
+      ->set_sort_order(140);
+
+  auto smoothing_config = std::make_shared<UM982Setting<float>>(
+      io, ack, 0.0f, UM982SmoothHeadingCommand, "smoothing",
+      R"JSON({"type":"object","properties":{"smoothing":{"title":"Heading smoothing (epochs, 0 = off)","type":"number"}}})JSON",
+      "/UM982/Heading Smoothing");
+  ConfigItem(smoothing_config)
+      ->set_title("Heading smoothing")
+      ->set_description(
+          "Heading smoothing window in epochs (0-100). 0 turns smoothing off.")
+      ->set_sort_order(150);
+
+  um982_settings = {mode_config,    baseline_config,  offset_config,
+                    antijam_config, antispoof_config, smoothing_config};
+
+  // N2K source address (applied when N2kSenders is constructed, after config).
   float n2k_address_value = kN2kSourceAddress;
   String n2k_address_path = "/NMEA 2000/Source Address";
-  auto n2k_address =
+  n2k_address =
       std::make_shared<NumberConfig>(n2k_address_value, n2k_address_path);
   ConfigItem(n2k_address)
       ->set_title("NMEA 2000 source address")
       ->set_description(
-          "Device address on the NMEA 2000 bus (0-251). Must be unique on the "
-          "bus. Takes effect after a restart.")
+          "Device address on the NMEA 2000 bus (0-251). Must be unique. Takes "
+          "effect after a restart.")
       ->set_requires_restart(true)
       ->set_sort_order(300);
 
-  n2k = std::make_shared<gnss_rtk_compass::N2kSenders>(
-      static_cast<uint8_t>(n2k_address->get_value()));
-
-  // True heading: a single corrected value feeds both Signal K and NMEA 2000.
-  auto heading_true =
-      hpr->attitude_
-          .connect_to(std::make_shared<LambdaTransform<AttitudeVector, float>>(
-              [](const AttitudeVector& a) { return a.yaw; }))
-          ->connect_to(std::make_shared<AngleCorrection>(0, 0,
-                                                         "/Heading/Offset"));
-  auto sk_heading = std::make_shared<SKOutputFloat>("navigation.headingTrue",
-                                                    "/SK Path/Heading True");
-  // set_metadata copies its argument, so a stack-local is safe (avoids `new`).
-  SKMetadata heading_meta("rad", "True Heading", "GNSS dual-antenna true heading",
-                          "Heading", 30);
-  sk_heading->set_metadata(&heading_meta);
-  heading_true->connect_to(sk_heading);
-  heading_true->connect_to(&n2k->heading_);
-
-  // Expose the heading correction in the web UI. "offset" (radians) aligns the
-  // antenna baseline with the vessel heading; "min_angle" sets the lower bound
-  // of the output range (0 gives 0..2pi).
-  ConfigItem(heading_true)
-      ->set_title("Heading offset")
-      ->set_description(
-          "Correction applied to the GNSS true heading, in radians, to account "
-          "for the antenna baseline's mounting alignment.")
-      ->set_sort_order(100);
-
-  // The "/Heading/Offset" correction applies to the heading outputs above.
-  // Attitude reports the raw baseline (roll/pitch/yaw straight from the module).
-  hpr->attitude_.connect_to(std::make_shared<SKOutputAttitudeVector>(
-      "navigation.attitude", "/SK Path/Attitude"));
-  hpr->attitude_.connect_to(&n2k->attitude_);
-
-  hpr->heading_quality_.connect_to(std::make_shared<SKOutputString>(
-      "navigation.gnss.headingQuality", "/SK Path/Heading Quality"));
-
-  // NMEA 2000 position/COG/SOG/GNSS inputs (Signal K outputs are wired by
-  // ConnectGNSS above).
-  gnss_data->position.connect_to(&n2k->position_);
-  gnss_data->true_course.connect_to(&n2k->cog_);
-  gnss_data->speed.connect_to(&n2k->sog_);
-  gnss_data->num_satellites.connect_to(&n2k->num_satellites_);
-  gnss_data->horizontal_dilution.connect_to(&n2k->hdop_);
-  gnss_data->datetime.connect_to(&n2k->datetime_);
+  // Give the module time to boot, then apply config; outputs wire up once all
+  // settings are ACK'd.
+  event_loop()->onDelay(500, []() { ApplyBootConfig(0); });
 }
 
 void loop() { event_loop()->tick(); }
