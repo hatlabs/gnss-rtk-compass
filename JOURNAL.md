@@ -99,6 +99,21 @@
 - NOT YET VERIFIED: actual PGN transmission — needs the N2K backbone + analyzer
   or plotter. Heading/attitude values also still need an outdoor fix.
 
+### make_shared refactor (2026-06-03)
+- Replaced all `new` in src/ with std::make_shared (per request).
+- Lifetime model: connect_to(shared_ptr) makes the producer own the consumer,
+  so chain objects (transforms, SK outputs) stay alive via their upstream
+  producer. Root objects (gnss_data, hpr parser, n2k) are held by RAW pointers
+  elsewhere (NMEA0183Parser registers sentence parsers raw; ConnectGNSS
+  references GNSSData raw; N2kSenders onRepeat captures this), so they are kept
+  in program-lifetime global shared_ptrs in main.cpp. A local shared_ptr there
+  would dangle when setup() returns.
+- SKOutputFloat (SKOutputNumeric) has no shared_ptr<SKMetadata> ctor, only the
+  raw one (takes ownership). Used the (path, config, units) ctor with "rad"
+  instead — clears the metadata warning without `new` in our code.
+- Verified on device: clean boot, no crash, HPR still parsed (parser alive).
+  Flash 89.8%.
+
 ### Still TODO
 - Implement HPR parser ($GNHPR -> RTKData -> SK headingTrue/attitude) and
   N2K senders (Phase: implement). HPR field order confirmed from live data and

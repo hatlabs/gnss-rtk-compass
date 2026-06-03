@@ -3,6 +3,8 @@
 #include <N2kMessages.h>
 #include <NMEA2000_esp32.h>
 
+#include <memory>
+
 #include "sensesp.h"
 
 namespace gnss_rtk_compass {
@@ -18,7 +20,7 @@ constexpr unsigned long kExpiry = 2000;
 
 constexpr unsigned char kSID = 0xFF;  // sequence id unused
 
-tNMEA2000* nmea2000 = nullptr;
+std::shared_ptr<tNMEA2000_esp32> nmea2000;
 
 uint16_t DaysSince1970(time_t t) { return t / 86400; }
 double SecondsSinceMidnight(time_t t) { return t % 86400; }
@@ -44,7 +46,7 @@ N2kSenders::N2kSenders(uint8_t source_address)
       num_satellites_v_(0, kExpiry, 0),
       hdop_v_(N2kDoubleNA, kExpiry, N2kDoubleNA),
       datetime_v_(0, kExpiry, 0) {
-  nmea2000 = new tNMEA2000_esp32(kCanTxPin, kCanRxPin);
+  nmea2000 = std::make_shared<tNMEA2000_esp32>(kCanTxPin, kCanRxPin);
 
   nmea2000->SetProductInformation("00000001", 130, "GNSS RTK Compass", "1.0",
                                   "1.0");

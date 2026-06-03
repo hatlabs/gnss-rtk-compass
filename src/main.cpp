@@ -32,7 +32,13 @@ constexpr uint32_t kUM982BaudRate = 115200;
 // Unique address on the NMEA 2000 bus (see SPEC.md).
 constexpr uint8_t kN2kSourceAddress = 25;
 
+// Held for the program lifetime: the NMEA 0183 parser registers sentence
+// parsers by raw pointer and ConnectGNSS references the GNSSData by raw
+// pointer, so these roots must not be destroyed.
 std::shared_ptr<NMEA0183IOTask> nmea_io;
+std::shared_ptr<GNSSData> gnss_data;
+std::shared_ptr<gnss_rtk_compass::UnicoreHPRSentenceParser> hpr;
+std::shared_ptr<gnss_rtk_compass::N2kSenders> n2k;
 
 // Put the UM982 into dual-antenna heading mode and enable the NMEA sentences
 // we consume. Sent on every boot so the module is self-configuring after a
@@ -73,40 +79,39 @@ void setup() {
 
   // TEMP (hardware bring-up): log every raw line received from the UM982.
   nmea_io->line_producer_->connect_to(
-      new LambdaConsumer<String>([](const String& line) {
+      std::make_shared<LambdaConsumer<String>>([](const String& line) {
         ESP_LOGI("UM982", "RX: %s", line.c_str());
       }));
 
   auto* parser = &nmea_io->parser_;
 
   // Standard GNSS sentences -> Signal K (position, SOG, COG, sats, quality).
-  auto* gnss_data = new GNSSData();
-  ConnectGNSS(parser, gnss_data);
+  gnss_data = std::make_shared<GNSSData>();
+  ConnectGNSS(parser, gnss_data.get());
 
   // Dual-antenna heading/attitude from the UM982 $GNHPR sentence.
-  auto* hpr = new gnss_rtk_compass::UnicoreHPRSentenceParser(parser);
+  hpr = std::make_shared<gnss_rtk_compass::UnicoreHPRSentenceParser>(parser);
 
-  auto* n2k = new gnss_rtk_compass::N2kSenders(kN2kSourceAddress);
+  n2k = std::make_shared<gnss_rtk_compass::N2kSenders>(kN2kSourceAddress);
 
   // True heading: a single corrected value feeds both Signal K and NMEA 2000.
-  auto* heading_true =
+  auto heading_true =
       hpr->attitude_
-          .connect_to(new LambdaTransform<AttitudeVector, float>(
+          .connect_to(std::make_shared<LambdaTransform<AttitudeVector, float>>(
               [](const AttitudeVector& a) { return a.yaw; }))
-          ->connect_to(new AngleCorrection(0, 0, "/Heading/Offset"));
-  heading_true->connect_to(new SKOutputFloat(
-      "navigation.headingTrue", "/SK Path/Heading True",
-      new SKMetadata("rad", "True Heading", "GNSS dual-antenna true heading",
-                     "Heading", 30)));
+          ->connect_to(std::make_shared<AngleCorrection>(0, 0,
+                                                         "/Heading/Offset"));
+  heading_true->connect_to(std::make_shared<SKOutputFloat>(
+      "navigation.headingTrue", "/SK Path/Heading True", "rad"));
   heading_true->connect_to(&n2k->heading_);
 
   // The "/Heading/Offset" correction applies to the heading outputs above.
   // Attitude reports the raw baseline (roll/pitch/yaw straight from the module).
-  hpr->attitude_.connect_to(
-      new SKOutputAttitudeVector("navigation.attitude", "/SK Path/Attitude"));
+  hpr->attitude_.connect_to(std::make_shared<SKOutputAttitudeVector>(
+      "navigation.attitude", "/SK Path/Attitude"));
   hpr->attitude_.connect_to(&n2k->attitude_);
 
-  hpr->heading_quality_.connect_to(new SKOutputString(
+  hpr->heading_quality_.connect_to(std::make_shared<SKOutputString>(
       "navigation.gnss.headingQuality", "/SK Path/Heading Quality"));
 
   // NMEA 2000 position/COG/SOG/GNSS inputs (Signal K outputs are wired by
