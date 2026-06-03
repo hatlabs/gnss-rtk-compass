@@ -12,6 +12,7 @@
 #include "sensesp/system/lambda_consumer.h"
 #include "sensesp/transforms/angle_correction.h"
 #include "sensesp/transforms/lambda_transform.h"
+#include "sensesp/ui/config_item.h"
 #include "sensesp_app_builder.h"
 #include "sensesp_nmea0183/nmea0183.h"
 #include "sensesp_nmea0183/wiring.h"
@@ -109,6 +110,16 @@ void setup() {
   sk_heading->set_metadata(&heading_meta);
   heading_true->connect_to(sk_heading);
   heading_true->connect_to(&n2k->heading_);
+
+  // Expose the heading correction in the web UI. "offset" (radians) aligns the
+  // antenna baseline with the vessel heading; "min_angle" sets the lower bound
+  // of the output range (0 gives 0..2pi).
+  ConfigItem(heading_true)
+      ->set_title("Heading offset")
+      ->set_description(
+          "Correction applied to the GNSS true heading, in radians, to account "
+          "for the antenna baseline's mounting alignment.")
+      ->set_sort_order(100);
 
   // The "/Heading/Offset" correction applies to the heading outputs above.
   // Attitude reports the raw baseline (roll/pitch/yaw straight from the module).

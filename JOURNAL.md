@@ -137,6 +137,18 @@
 - BONUS: real heading observed this session -- $GNHPR quality 5 (RTK float),
   heading ~309 deg, 15 sats. The HPR parser works end-to-end on live data.
 
+### Web UI config exposure (2026-06-03)
+- Symptom: config options (heading offset) not showing in the web UI.
+- Cause: in SensESP 3.x a config_path only makes an object persistable; the web
+  UI lists it only if registered via ConfigItem(obj). The AngleCorrection was
+  created inline and never registered.
+- Fix: ConfigItem(heading_true) with title/description/sort order. Verified at
+  boot: "Registering ConfigItemT with path /Heading/Offset".
+- Note: ConfigItem requires a ConfigSchema(T&) overload. AngleCorrection has one;
+  SKOutput<float/String/AttitudeVector> do NOT, so SK output paths can't be
+  ConfigItem'd without adding a schema (library territory). N2K source address
+  is a constexpr; could be exposed via a NumberConfig if wanted later.
+
 ### Still TODO
 - Implement HPR parser ($GNHPR -> RTKData -> SK headingTrue/attitude) and
   N2K senders (Phase: implement). HPR field order confirmed from live data and
