@@ -64,6 +64,23 @@
   WiFi is up. Repoint to halos.hurma via the web UI later. Not a code issue.
 - Added a TEMP raw-line logger to main.cpp for bring-up; remove before finalize.
 
+### $GNHPR parser implemented (2026-06-03)
+- SensESP fix PR #966 MERGED to main (9c69ba4); 3.3.1 release deferred (user
+  reviewing other SensESP PRs first). Project lib_deps pinned to that commit;
+  clean rebuild from git confirms no manual .pio patch needed.
+- Added project-local src/gnhpr_parser.{h,cpp}: UnicoreHPRSentenceParser
+  (address "..HPR") parsing utc/heading/pitch/roll/quality/satellites. Converts
+  deg->rad (SK is SI). Emits attitude only when quality 4 (fixed) or 5 (float);
+  always publishes quality string. Mirrors the library's QuectelPQTMTAR pattern.
+- ConnectUM982Heading wires: attitude.yaw -> AngleCorrection("/Heading/Offset")
+  -> navigation.headingTrue (rad, with metadata); attitude ->
+  navigation.attitude; quality -> navigation.gnss.headingQuality.
+- Verified on device: clean boot, no crash, parser integrated. UM982 ACKs
+  "MODE HEADING2 FIXLENGTH response: OK". Occasional corrupt UART frames are
+  correctly rejected by checksum validation. QF=0 indoors so no heading emitted
+  (gating correct). Flash now 87.5%.
+- NOT YET VERIFIED: actual heading values — needs outdoor satellite fix (QF>=4).
+
 ### Still TODO
 - Implement HPR parser ($GNHPR -> RTKData -> SK headingTrue/attitude) and
   N2K senders (Phase: implement). HPR field order confirmed from live data and

@@ -12,6 +12,8 @@
 #include "sensesp_nmea0183/nmea0183.h"
 #include "sensesp_nmea0183/wiring.h"
 
+#include "gnhpr_parser.h"
+
 using namespace sensesp;
 using namespace sensesp::nmea0183;
 
@@ -69,10 +71,8 @@ void setup() {
   // Standard GNSS sentences: position, SOG, COG, satellites, fix quality.
   ConnectGNSS(&nmea_io->parser_, new GNSSData());
 
-  // TODO(SPEC.md): heading/pitch/roll + baseline quality come from the UM982
-  // $GNHPR sentence, for which no library parser exists. Add a project-local
-  // GNHPRSentenceParser (SentenceParser subclass) feeding RTKData and wire it
-  // to navigation.headingTrue / navigation.attitude.
+  // Dual-antenna heading/attitude from the UM982 $GNHPR sentence.
+  gnss_rtk_compass::ConnectUM982Heading(&nmea_io->parser_);
 
   // TODO(SPEC.md): NMEA 2000 senders for PGNs 127250, 127257, 129025, 129026,
   // 129029. Port the sender pattern to the SensESP 3.x API.
