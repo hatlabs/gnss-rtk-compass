@@ -58,9 +58,9 @@ inline String UM982BaselineLengthCommand(const int& length_cm) {
   snprintf(buf, sizeof(buf), "CONFIG HEADING LENGTH %d", length_cm > 0 ? length_cm : 0);
   return buf;
 }
-inline String UM982HeadingOffsetCommand(const int& heading_deg) {
+inline String UM982HeadingOffsetCommand(const float& heading_deg) {
   char buf[48];
-  snprintf(buf, sizeof(buf), "CONFIG HEADING OFFSET %d 0", heading_deg);
+  snprintf(buf, sizeof(buf), "CONFIG HEADING OFFSET %.1f 0", heading_deg);
   return buf;
 }
 inline String UM982SmoothHeadingCommand(const int& window) {

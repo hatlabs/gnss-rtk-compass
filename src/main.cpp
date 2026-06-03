@@ -180,9 +180,9 @@ void setup() {
           "stabilise the heading solution. 0 lets the module estimate it.")
       ->set_sort_order(110);
 
-  auto offset_config = std::make_shared<UM982Setting<int>>(
-      io, ack, 0, UM982HeadingOffsetCommand, "offset_deg",
-      R"JSON({"type":"object","properties":{"offset_deg":{"title":"Heading offset (degrees)","type":"integer"}}})JSON",
+  auto offset_config = std::make_shared<UM982Setting<float>>(
+      io, ack, 0.0f, UM982HeadingOffsetCommand, "offset_deg",
+      R"JSON({"type":"object","properties":{"offset_deg":{"title":"Heading offset (degrees)","type":"number","multipleOf":0.1}}})JSON",
       "/UM982/Heading Offset");
   ConfigItem(offset_config)
       ->set_title("Heading offset")
