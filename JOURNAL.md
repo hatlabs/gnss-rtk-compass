@@ -156,7 +156,7 @@
   no ConfigSchema(SKOutput<T>&), so ConfigItem can't render it. A small
   templated ConfigSchema overload in SignalK/SensESP would restore it.
 
-### Stage 1: UM982 device-settings config cards (2026-06-03) — BUILDS, NOT YET HW-VERIFIED
+### Stage 1: UM982 device-settings config cards (2026-06-03) — HW-VERIFIED
 - Followed the wind-interface pattern (ref/HALSER-wind-interface/src/autonnic_config.h):
   device settings on config cards that push commands to the module.
 - src/um982_config.h: UM982CommandAckParser (parses "$command,<cmd>,response:
@@ -173,11 +173,13 @@
   antispoof, smoothing); N2K source address card retained.
 - All default commands are valid/ACK-able (FIXLENGTH, LENGTH 0, OFFSET 0,
   ANTIJAM AUTO, ANTISPOOF DISABLE, SMOOTH HEADING 0).
-- RISK / TODO before trusting on hardware: only MODE HEADING2 is confirmed to
-  ACK with "response: OK". If CONFIG ANTIJAM/ANTISPOOF/HEADING/OFFSET/SMOOTH do
-  NOT ACK that way, the boot gate hangs and the device stays dark forever.
-  MUST capture boot serial on-device to confirm each command ACKs; if some
-  don't, send those fire-and-forget or match their actual response.
+- VERIFIED on device: all 6 cards register; boot sequence applies MODE +
+  5x CONFIG, each ACKs (advanced cleanly every 2s, zero "No ACK" retries),
+  then "Configuration complete; outputs enabled". No crash. So the earlier
+  risk (only MODE confirmed to ACK) is resolved -- every CONFIG command ACKs
+  with "response: OK".
+- Minor: boot config takes ~12s (6 x 2s fixed wait per command). Could advance
+  immediately on ACK instead of always waiting the 2s poll. Not critical.
 - Flash now 90.4% on min_spiffs (4MB board) -- headroom getting tight before
   Stage 2 (constellation) lands.
 
