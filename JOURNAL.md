@@ -148,6 +148,13 @@
   SKOutput<float/String/AttitudeVector> do NOT, so SK output paths can't be
   ConfigItem'd without adding a schema (library territory). N2K source address
   is a constexpr; could be exposed via a NumberConfig if wanted later.
+- Exposed the N2K source address via a NumberConfig (NumberConfig has a
+  ConfigSchema), requires_restart=true (applied at NMEA2000 init). Verified:
+  "Registering ConfigItemT with path /NMEA 2000/Source Address".
+- SK output path config is a real SensESP gap: SKOutput::to_json/from_json
+  fully support reconfiguring sk_path (was UI-editable in 2.x), but 3.x ships
+  no ConfigSchema(SKOutput<T>&), so ConfigItem can't render it. A small
+  templated ConfigSchema overload in SignalK/SensESP would restore it.
 
 ### Still TODO
 - Implement HPR parser ($GNHPR -> RTKData -> SK headingTrue/attitude) and

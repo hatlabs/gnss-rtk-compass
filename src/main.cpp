@@ -13,6 +13,7 @@
 #include "sensesp/transforms/angle_correction.h"
 #include "sensesp/transforms/lambda_transform.h"
 #include "sensesp/ui/config_item.h"
+#include "sensesp/ui/ui_controls.h"
 #include "sensesp_app_builder.h"
 #include "sensesp_nmea0183/nmea0183.h"
 #include "sensesp_nmea0183/wiring.h"
@@ -93,7 +94,22 @@ void setup() {
   // Dual-antenna heading/attitude from the UM982 $GNHPR sentence.
   hpr = std::make_shared<gnss_rtk_compass::UnicoreHPRSentenceParser>(parser);
 
-  n2k = std::make_shared<gnss_rtk_compass::N2kSenders>(kN2kSourceAddress);
+  // N2K source address, configurable in the web UI. Applied at startup, so a
+  // change needs a restart.
+  float n2k_address_value = kN2kSourceAddress;
+  String n2k_address_path = "/NMEA 2000/Source Address";
+  auto n2k_address =
+      std::make_shared<NumberConfig>(n2k_address_value, n2k_address_path);
+  ConfigItem(n2k_address)
+      ->set_title("NMEA 2000 source address")
+      ->set_description(
+          "Device address on the NMEA 2000 bus (0-251). Must be unique on the "
+          "bus. Takes effect after a restart.")
+      ->set_requires_restart(true)
+      ->set_sort_order(300);
+
+  n2k = std::make_shared<gnss_rtk_compass::N2kSenders>(
+      static_cast<uint8_t>(n2k_address->get_value()));
 
   // True heading: a single corrected value feeds both Signal K and NMEA 2000.
   auto heading_true =
