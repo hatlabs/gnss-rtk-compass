@@ -17,7 +17,6 @@
 #include "sensesp/system/lambda_consumer.h"
 #include "sensesp/transforms/lambda_transform.h"
 #include "sensesp/ui/config_item.h"
-#include "sensesp/ui/ui_controls.h"
 #include "sensesp_app_builder.h"
 #include "sensesp_nmea0183/nmea0183.h"
 #include "sensesp_nmea0183/wiring.h"
@@ -42,15 +41,15 @@ constexpr uint8_t kN2kSourceAddress = 25;
 // Program-lifetime roots (registered by raw pointer elsewhere).
 std::shared_ptr<NMEA0183IOTask> nmea_io;
 std::shared_ptr<UM982CommandAckParser> ack_parser;
-std::shared_ptr<NumberConfig> n2k_address;
+std::shared_ptr<IntConfig> n2k_address;
 std::vector<std::shared_ptr<UM982SettingBase>> um982_settings;
 std::shared_ptr<GNSSData> gnss_data;
 std::shared_ptr<UnicoreHPRSentenceParser> hpr;
 std::shared_ptr<N2kSenders> n2k;
 
-// Boot-config ACK state (set from the NMEA task, read from the event loop).
-volatile bool ack_received = false;
-volatile bool ack_ok = false;
+// Boot-config sequencer state.
+volatile int boot_index = 0;
+volatile bool boot_active = false;
 
 // Enable the NMEA output sentences once the module is configured. Period
 // argument is in seconds (0.1 = 10 Hz).
@@ -104,26 +103,36 @@ void WireOutputs() {
   ESP_LOGI("UM982cfg", "Configuration complete; outputs enabled");
 }
 
-// Apply UM982 settings one at a time, waiting for each ACK. Retries
-// indefinitely so a slow-booting or briefly-absent module self-heals; outputs
-// stay dark until every setting is confirmed.
-void ApplyBootConfig(size_t index) {
-  if (index >= um982_settings.size()) {
-    WireOutputs();
-    return;
-  }
-  String command = um982_settings[index]->command();
-  ack_received = false;
-  nmea_io->set(command);
+// Send the current boot-config command and arm a retry. The sequence advances
+// the moment an ACK arrives (see OnBootAck); the timeout only resends a command
+// that went unanswered, so a slow/absent module self-heals and outputs stay
+// dark until every setting is confirmed.
+void SendBootStep() {
+  int step = boot_index;
+  String command = um982_settings[step]->command();
   ESP_LOGI("UM982cfg", "Applying: %s", command.c_str());
-  event_loop()->onDelay(2000, [index, command]() {
-    if (ack_received && ack_ok) {
-      ApplyBootConfig(index + 1);
-    } else {
-      ESP_LOGW("UM982cfg", "No ACK for '%s', retrying", command.c_str());
-      ApplyBootConfig(index);
+  nmea_io->set(command);
+  event_loop()->onDelay(2500, [step]() {
+    if (boot_active && boot_index == step) {
+      ESP_LOGW("UM982cfg", "No ACK for step %d, retrying", step);
+      SendBootStep();
     }
   });
+}
+
+// Called on every command ACK. During boot, advance to the next setting
+// immediately (or wire outputs once all are confirmed).
+void OnBootAck(bool ok) {
+  if (!boot_active || !ok) {
+    return;
+  }
+  boot_index++;
+  if (boot_index >= (int)um982_settings.size()) {
+    boot_active = false;
+    event_loop()->onDelay(0, []() { WireOutputs(); });
+  } else {
+    event_loop()->onDelay(0, []() { SendBootStep(); });
+  }
 }
 
 void setup() {
@@ -142,10 +151,7 @@ void setup() {
 
   nmea_io = std::make_shared<NMEA0183IOTask>(&Serial2);
   ack_parser = std::make_shared<UM982CommandAckParser>(&nmea_io->parser_);
-  ack_parser->connect_to(std::make_shared<LambdaConsumer<bool>>([](bool ok) {
-    ack_ok = ok;
-    ack_received = true;
-  }));
+  ack_parser->connect_to(std::make_shared<LambdaConsumer<bool>>(OnBootAck));
 
   // UM982 device settings, configurable from the web UI. Each save() sends the
   // command and waits for the module ACK; the boot sequence applies them all.
@@ -154,7 +160,7 @@ void setup() {
 
   auto mode_config = std::make_shared<UM982Setting<String>>(
       io, ack, String("FIXLENGTH"), UM982HeadingModeCommand, "mode",
-      R"JSON({"type":"object","properties":{"mode":{"title":"Heading mode","type":"string","enum":["FIXLENGTH","VARIABLELENGTH","STATIC","LOWDYNAMIC","TRACTOR"]}}})JSON",
+      R"JSON({"type":"object","properties":{"mode":{"title":"Heading mode","type":"array","format":"select","uniqueItems":true,"items":{"type":"string","enum":["FIXLENGTH","VARIABLELENGTH","STATIC","LOWDYNAMIC","TRACTOR"]}}}})JSON",
       "/UM982/Heading Mode");
   ConfigItem(mode_config)
       ->set_title("Heading mode")
@@ -163,9 +169,9 @@ void setup() {
           "baseline (the usual boat install).")
       ->set_sort_order(100);
 
-  auto baseline_config = std::make_shared<UM982Setting<float>>(
-      io, ack, 0.0f, UM982BaselineLengthCommand, "length_cm",
-      R"JSON({"type":"object","properties":{"length_cm":{"title":"Baseline length (cm, 0 = auto)","type":"number"}}})JSON",
+  auto baseline_config = std::make_shared<UM982Setting<int>>(
+      io, ack, 0, UM982BaselineLengthCommand, "length_cm",
+      R"JSON({"type":"object","properties":{"length_cm":{"title":"Baseline length (cm, 0 = auto)","type":"integer"}}})JSON",
       "/UM982/Baseline Length");
   ConfigItem(baseline_config)
       ->set_title("Antenna baseline length")
@@ -174,9 +180,9 @@ void setup() {
           "stabilise the heading solution. 0 lets the module estimate it.")
       ->set_sort_order(110);
 
-  auto offset_config = std::make_shared<UM982Setting<float>>(
-      io, ack, 0.0f, UM982HeadingOffsetCommand, "offset_deg",
-      R"JSON({"type":"object","properties":{"offset_deg":{"title":"Heading offset (degrees)","type":"number"}}})JSON",
+  auto offset_config = std::make_shared<UM982Setting<int>>(
+      io, ack, 0, UM982HeadingOffsetCommand, "offset_deg",
+      R"JSON({"type":"object","properties":{"offset_deg":{"title":"Heading offset (degrees)","type":"integer"}}})JSON",
       "/UM982/Heading Offset");
   ConfigItem(offset_config)
       ->set_title("Heading offset")
@@ -187,7 +193,7 @@ void setup() {
 
   auto antijam_config = std::make_shared<UM982Setting<String>>(
       io, ack, String("AUTO"), UM982AntiJamCommand, "antijam",
-      R"JSON({"type":"object","properties":{"antijam":{"title":"Anti-jamming","type":"string","enum":["DISABLE","AUTO","FORCE"]}}})JSON",
+      R"JSON({"type":"object","properties":{"antijam":{"title":"Anti-jamming","type":"array","format":"select","uniqueItems":true,"items":{"type":"string","enum":["DISABLE","AUTO","FORCE"]}}}})JSON",
       "/UM982/Anti-Jamming");
   ConfigItem(antijam_config)
       ->set_title("Anti-jamming")
@@ -198,16 +204,16 @@ void setup() {
 
   auto antispoof_config = std::make_shared<UM982Setting<String>>(
       io, ack, String("DISABLE"), UM982AntiSpoofCommand, "antispoof",
-      R"JSON({"type":"object","properties":{"antispoof":{"title":"Anti-spoofing","type":"string","enum":["DISABLE","ENABLE"]}}})JSON",
+      R"JSON({"type":"object","properties":{"antispoof":{"title":"Anti-spoofing","type":"array","format":"select","uniqueItems":true,"items":{"type":"string","enum":["DISABLE","ENABLE"]}}}})JSON",
       "/UM982/Anti-Spoofing");
   ConfigItem(antispoof_config)
       ->set_title("Anti-spoofing")
       ->set_description("GNSS anti-spoofing protection.")
       ->set_sort_order(140);
 
-  auto smoothing_config = std::make_shared<UM982Setting<float>>(
-      io, ack, 0.0f, UM982SmoothHeadingCommand, "smoothing",
-      R"JSON({"type":"object","properties":{"smoothing":{"title":"Heading smoothing (epochs, 0 = off)","type":"number"}}})JSON",
+  auto smoothing_config = std::make_shared<UM982Setting<int>>(
+      io, ack, 0, UM982SmoothHeadingCommand, "smoothing",
+      R"JSON({"type":"object","properties":{"smoothing":{"title":"Heading smoothing (epochs, 0 = off)","type":"integer"}}})JSON",
       "/UM982/Heading Smoothing");
   ConfigItem(smoothing_config)
       ->set_title("Heading smoothing")
@@ -219,10 +225,8 @@ void setup() {
                     antijam_config, antispoof_config, smoothing_config};
 
   // N2K source address (applied when N2kSenders is constructed, after config).
-  float n2k_address_value = kN2kSourceAddress;
-  String n2k_address_path = "/NMEA 2000/Source Address";
-  n2k_address =
-      std::make_shared<NumberConfig>(n2k_address_value, n2k_address_path);
+  n2k_address = std::make_shared<IntConfig>(kN2kSourceAddress, "Source address",
+                                            "/NMEA 2000/Source Address");
   ConfigItem(n2k_address)
       ->set_title("NMEA 2000 source address")
       ->set_description(
@@ -233,7 +237,8 @@ void setup() {
 
   // Give the module time to boot, then apply config; outputs wire up once all
   // settings are ACK'd.
-  event_loop()->onDelay(500, []() { ApplyBootConfig(0); });
+  boot_active = true;
+  event_loop()->onDelay(500, []() { SendBootStep(); });
 }
 
 void loop() { event_loop()->tick(); }

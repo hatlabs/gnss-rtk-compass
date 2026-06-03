@@ -52,21 +52,20 @@ inline String UM982AntiJamCommand(const String& mode) {
 inline String UM982AntiSpoofCommand(const String& mode) {
   return "CONFIG ANTISPOOF " + mode;
 }
-inline String UM982BaselineLengthCommand(const float& length_cm) {
+inline String UM982BaselineLengthCommand(const int& length_cm) {
   // 0 restores automatic baseline estimation.
   char buf[48];
-  snprintf(buf, sizeof(buf), "CONFIG HEADING LENGTH %d",
-           length_cm > 0 ? (int)lroundf(length_cm) : 0);
+  snprintf(buf, sizeof(buf), "CONFIG HEADING LENGTH %d", length_cm > 0 ? length_cm : 0);
   return buf;
 }
-inline String UM982HeadingOffsetCommand(const float& heading_deg) {
+inline String UM982HeadingOffsetCommand(const int& heading_deg) {
   char buf[48];
-  snprintf(buf, sizeof(buf), "CONFIG HEADING OFFSET %.1f 0", heading_deg);
+  snprintf(buf, sizeof(buf), "CONFIG HEADING OFFSET %d 0", heading_deg);
   return buf;
 }
-inline String UM982SmoothHeadingCommand(const float& window) {
+inline String UM982SmoothHeadingCommand(const int& window) {
   char buf[48];
-  snprintf(buf, sizeof(buf), "CONFIG SMOOTH HEADING %d", (int)lroundf(window));
+  snprintf(buf, sizeof(buf), "CONFIG SMOOTH HEADING %d", window);
   return buf;
 }
 
@@ -143,6 +142,44 @@ class UM982Setting : public FileSystemSaveable,
 template <typename T>
 const String ConfigSchema(const UM982Setting<T>& obj) {
   return obj.get_config_schema();
+}
+
+/**
+ * @brief A persisted integer config value rendered as an integer field.
+ *
+ * SensESP's built-in NumberConfig uses a "number" schema, which the web UI
+ * shows with decimals. This renders as a plain integer.
+ */
+class IntConfig : public FileSystemSaveable, virtual public Serializable {
+ public:
+  IntConfig(int value, const char* title, String config_path)
+      : FileSystemSaveable(config_path), value_{value}, title_{title} {
+    load();
+  }
+  bool to_json(JsonObject& doc) override {
+    doc["value"] = value_;
+    return true;
+  }
+  bool from_json(const JsonObject& config) override {
+    if (!config["value"].is<float>()) {
+      return false;
+    }
+    value_ = config["value"].as<int>();
+    return true;
+  }
+  int get_value() const { return value_; }
+  const char* title() const { return title_; }
+
+ protected:
+  int value_;
+  const char* title_;
+};
+
+inline const String ConfigSchema(const IntConfig& obj) {
+  String schema =
+      R"JSON({"type":"object","properties":{"value":{"title":"<<title>>","type":"integer"}}})JSON";
+  schema.replace("<<title>>", obj.title());
+  return schema;
 }
 
 }  // namespace gnss_rtk_compass
