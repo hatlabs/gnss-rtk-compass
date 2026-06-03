@@ -44,8 +44,9 @@ void ConfigureUM982(Stream* stream) {
       "GPGGA 1",                  // position, fix quality, satellites at 1 Hz
       "GPRMC 1",                  // position, SOG, time at 1 Hz
       "GPVTG 1",                  // course over ground at 1 Hz
-      "SAVECONFIG",
   };
+  // Config is reapplied on every boot, so it is not persisted with SAVECONFIG
+  // (which would wear the module's flash).
   for (const char* command : commands) {
     stream->printf("%s\r\n", command);
     delay(100);
@@ -99,6 +100,8 @@ void setup() {
                      "Heading", 30)));
   heading_true->connect_to(&n2k->heading_);
 
+  // The "/Heading/Offset" correction applies to the heading outputs above.
+  // Attitude reports the raw baseline (roll/pitch/yaw straight from the module).
   hpr->attitude_.connect_to(
       new SKOutputAttitudeVector("navigation.attitude", "/SK Path/Attitude"));
   hpr->attitude_.connect_to(&n2k->attitude_);

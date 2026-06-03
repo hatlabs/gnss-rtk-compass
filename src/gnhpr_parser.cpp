@@ -24,12 +24,12 @@ bool UnicoreHPRSentenceParser::parse_fields(const char* field_strings,
     return false;
   }
 
-  float utc;  // consumed but unused; time comes from GGA/RMC
-  float heading_deg;
-  float pitch_deg;
-  float roll_deg;
-  int quality;
-  int num_satellites;
+  float utc = 0;  // consumed but unused; time comes from GGA/RMC
+  float heading_deg = 0;
+  float pitch_deg = 0;
+  float roll_deg = 0;
+  int quality = 0;
+  int num_satellites = 0;
 
   std::function<bool(const char*)> fps[] = {
       FLDP_OPT(Float, &utc),
