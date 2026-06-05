@@ -131,6 +131,12 @@
 - Project pinned to the local fork via symlink in platformio.ini (temporary,
   until the fork branch is merged; then restore a repo URL and delete the
   dangling NMEA2000_twai dir at the workspace root).
+- (2026-06-05) Upstream merged the fix as skarlsson/NMEA2000_twai PR #7
+  (merge bc7ab07; also PR #5 for the non-blocking transmit). Switched
+  platformio.ini from the symlink to
+  https://github.com/skarlsson/NMEA2000_twai#bc7ab07 (commit pin -- upstream
+  has no release tags). Rebuilt clean against upstream; deleted the local
+  workspace-root fork clone.
 - Verified on bench (no bus, 150s): 0 panics (was ~1/min); CAN logs down from
   thousands to ~5 (1 not-open + 1 startup init + 3x the pre-existing 1/min
   bus-off heartbeat). Device runs as a Signal-K-only compass with no N2K.
