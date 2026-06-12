@@ -116,7 +116,15 @@ NMEA 2000 PGNs:
 
 ## Building and flashing
 
-This is a [PlatformIO](https://platformio.org/) project:
+For building, flashing, and making modifications, the recommended approach
+is the [SensESP-workspace](https://github.com/hatlabs/SensESP-workspace):
+an AI-assisted firmware development environment where you describe what you
+want in plain language and [Claude Code](https://code.claude.com/docs/en/quickstart)
+handles the development process. Clone the workspace, run `./run init`, and
+clone this repository under its `projects/` directory.
+
+Alternatively, this is a standard [PlatformIO](https://platformio.org/)
+project that can be built directly:
 
 ```bash
 # Build
