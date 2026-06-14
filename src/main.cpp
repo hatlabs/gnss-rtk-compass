@@ -17,6 +17,7 @@
 #include "sensesp/system/lambda_consumer.h"
 #include "sensesp/transforms/lambda_transform.h"
 #include "sensesp/ui/config_item.h"
+#include "sensesp/ui/ui_controls.h"
 #include "sensesp_app_builder.h"
 #include "sensesp_nmea0183/nmea0183.h"
 #include "sensesp_nmea0183/wiring.h"
@@ -42,6 +43,10 @@ constexpr uint8_t kN2kSourceAddress = 25;
 std::shared_ptr<NMEA0183IOTask> nmea_io;
 std::shared_ptr<UM982CommandAckParser> ack_parser;
 std::shared_ptr<IntConfig> n2k_address;
+std::shared_ptr<StringConfig> ota_password_config;
+// Holds the OTA password for the whole program lifetime; enable_ota() keeps a
+// raw pointer into it.
+String ota_password;
 std::vector<std::shared_ptr<UM982SettingBase>> um982_settings;
 std::shared_ptr<GNSSData> gnss_data;
 std::shared_ptr<UnicoreHPRSentenceParser> hpr;
@@ -146,9 +151,25 @@ void setup() {
   Serial2.begin(kUM982BaudRate, SERIAL_8N1, kUM982RxPin, kUM982TxPin);
 
   SensESPAppBuilder builder;
+
+  // The builder constructs the app, which mounts the filesystem, so persisted
+  // config is available from here on. Load the OTA password before starting the
+  // OTA service. Changing it from the web UI takes effect after a restart.
+  ota_password = "thisisfine";
+  String ota_password_path = "/System/OTA Password";
+  ota_password_config = std::make_shared<StringConfig>(ota_password, ota_password_path);
+  ota_password = ota_password_config->get_value();
+  ConfigItem(ota_password_config)
+      ->set_title("OTA update password")
+      ->set_description(
+          "Password for uploading firmware over WiFi. Takes effect after a "
+          "restart.")
+      ->set_requires_restart(true)
+      ->set_sort_order(310);
+
   sensesp_app = (&builder)
                     ->set_hostname("gnss-rtk-compass")
-                    ->enable_ota("thisisfine")
+                    ->enable_ota(ota_password.c_str())
                     ->get_app();
 
   nmea_io = std::make_shared<NMEA0183IOTask>(&Serial2);

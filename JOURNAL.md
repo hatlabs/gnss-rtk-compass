@@ -209,3 +209,20 @@
 - Repoint SK server to halos.hurma; outdoor fix test for real heading.
 - Remove TEMP raw-line logger.
 - Review before finalizing.
+
+## 2026-06-14 — OTA password made configurable
+
+User asked whether OTA flashing was enabled. It was: `enable_ota("thisisfine")`
+in main.cpp + min_spiffs.csv giving two app slots. Made the password
+configurable from the web UI.
+
+- Added a persisted `StringConfig` at `/System/OTA Password` (default
+  "thisisfine"), `requires_restart` (ArduinoOTA reads the password only at boot).
+- Key detail: `SensESPAppBuilder builder;` constructs the app, which mounts
+  SPIFFS in its constructor, so the persisted value can be loaded *before*
+  `enable_ota()` in the builder chain — no bootstrap problem. Password held in a
+  program-lifetime global so the const char* passed to enable_ota never dangles.
+- Built (90.9% flash), flashed, verified on device: serial shows
+  "Registering ConfigItemT with path /System/OTA Password", clean boot.
+- To push updates over WiFi, the espota block in platformio.ini still needs
+  uncommenting (USB upload otherwise).
