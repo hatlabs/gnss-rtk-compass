@@ -83,11 +83,10 @@ void WireOutputs() {
       [](const AttitudeVector& a) { return a.yaw; });
   hpr->attitude_.connect_to(yaw);
 
-  auto sk_heading = std::make_shared<SKOutputFloat>("navigation.headingTrue",
-                                                    "/SK Path/Heading True");
-  SKMetadata heading_meta("rad", "True Heading", "GNSS dual-antenna true heading",
-                          "Heading", 30);
-  sk_heading->set_metadata(&heading_meta);
+  auto sk_heading = std::make_shared<SKOutputFloat>(
+      "navigation.headingTrue", "/SK Path/Heading True",
+      new SKMetadata("rad", "True Heading", "GNSS dual-antenna true heading",
+                     "Heading", 30));
   yaw->connect_to(sk_heading);
   yaw->connect_to(&n2k->heading_);
 
