@@ -209,3 +209,20 @@
 - Repoint SK server to halos.hurma; outdoor fix test for real heading.
 - Remove TEMP raw-line logger.
 - Review before finalizing.
+
+## 2026-06-18 (afternoon) — #1020 reviewed, refined, merged; wind+ais flashed
+
+- Multi-persona review of PR #1020 (WiFi multi-AP failover). Reliability reviewer
+  caught that the unconditional `disconnect(false)` would abort a slow single-AP
+  association every 20 s. Refined to a conditional disconnect (only when the
+  target config index changes; `static last_applied_idx`) and fixed the stale
+  20 s comment. Posted review + resolution as PR comments, amended the single
+  commit, CI green, merged to SensESP main (merge 1faa866). main now carries
+  #1018 + #1020.
+- Flashed wind (halser_espidf) and ais (halser_espidf, after correcting from the
+  task's `halser` -- TLS alloc-fail on the arduino build) from merged main + fork.
+  Both verified: clean boot, WiFi failover/connect, TLS SK connection, zero
+  ESP_ERR_WIFI_STATE. Bus-off recovery not re-triggered on the passive bench.
+- serial_monitor.py reset-free rewrite committed + PR'd (workspace #6).
+- Open: move NMEA2000_twai back to skarlsson once #8 merges; exercise bus-off on
+  wind/ais if wanted; return compass to boat for live SK confirm.
