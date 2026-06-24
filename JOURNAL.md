@@ -209,3 +209,42 @@
 - Repoint SK server to halos.hurma; outdoor fix test for real heading.
 - Remove TEMP raw-line logger.
 - Review before finalizing.
+
+## 2026-06-18 (afternoon) — #1020 reviewed, refined, merged; wind+ais flashed
+
+- Multi-persona review of PR #1020 (WiFi multi-AP failover). Reliability reviewer
+  caught that the unconditional `disconnect(false)` would abort a slow single-AP
+  association every 20 s. Refined to a conditional disconnect (only when the
+  target config index changes; `static last_applied_idx`) and fixed the stale
+  20 s comment. Posted review + resolution as PR comments, amended the single
+  commit, CI green, merged to SensESP main (merge 1faa866). main now carries
+  #1018 + #1020.
+- Flashed wind (halser_espidf) and ais (halser_espidf, after correcting from the
+  task's `halser` -- TLS alloc-fail on the arduino build) from merged main + fork.
+  Both verified: clean boot, WiFi failover/connect, TLS SK connection, zero
+  ESP_ERR_WIFI_STATE. Bus-off recovery not re-triggered on the passive bench.
+- serial_monitor.py reset-free rewrite committed + PR'd (workspace #6).
+- Open: move NMEA2000_twai back to skarlsson once #8 merges; exercise bus-off on
+  wind/ais if wanted; return compass to boat for live SK confirm.
+
+## 2026-06-18 (boat) — espidf build fixes the TLS Signal K connection
+
+On the boat the compass joined WiFi but never connected to Signal K: it found the
+server (10.84.80.150:4430) and tried wss, but `mbedtls_ssl_setup` failed every
+attempt with MBEDTLS_ERR_SSL_ALLOC_FAILED (-0x7F00) -- no TLS context, no
+handshake, no stored fingerprint (so clearing TOFU couldn't help). Root cause:
+the default `shesp32` (arduino, precompiled libs) build ignores sdkconfig, so
+CONFIG_MBEDTLS_DYNAMIC_BUFFER was inactive and the static TLS buffers wouldn't
+fit a contiguous block. The same wall the ais hit on its arduino env.
+
+Fix: added `env:shesp32_espidf` (espidf+arduino source build) with
+CONFIG_MBEDTLS_DYNAMIC_BUFFER, mirroring wind/ais; made it the default.
+min_spiffs.csv is byte-identical to the arduino framework's, so the partition
+table is unchanged and OTA stays compatible. Flashed via espota (`--auth
+thisisfine`; the old reboot loop, now fixed, was what made espota unreliable).
+Verified on the boat: TOFU fingerprint 8b38517b... received and verified, SK
+access request approved, data flowing, zero mbedtls alloc failures.
+
+Deploy note: the flashed firmware combines this deploy config (PR #4) with the
+heading-metadata + OTA-password feature work on fix/sk-heading-metadata; both
+reach main via their PRs, after which main == deployed.

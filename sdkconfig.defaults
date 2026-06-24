@@ -1,0 +1,26 @@
+# sdkconfig for the espidf+arduino dual build (env:shesp32_espidf). It is only
+# authoritative under the source build; the default precompiled-arduino env
+# (shesp32) ignores this file entirely. Mirrors SensESP's root sdkconfig.defaults
+# for the ESP32 (no USB-Serial-JTAG console line -- the SH-ESP32 uses a UART-USB
+# bridge, so the IDF default UART0 console is correct).
+#
+# AUTOSTART_ARDUINO + FREERTOS_HZ=1000 are required by the Arduino core.
+CONFIG_AUTOSTART_ARDUINO=y
+CONFIG_FREERTOS_HZ=1000
+CONFIG_MBEDTLS_PSK_MODES=y
+CONFIG_MBEDTLS_KEY_EXCHANGE_PSK=y
+CONFIG_ESPTOOLPY_FLASHFREQ="80m"
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_ESPTOOLPY_FLASHSIZE="4MB"
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=4096
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1=n
+CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024
+
+# The fix: allocate/free the mbedTLS TX/RX record buffers per-operation instead
+# of holding two 16 KB buffers for the whole connection. Without this,
+# mbedtls_ssl_setup fails with MBEDTLS_ERR_SSL_ALLOC_FAILED and the TLS Signal K
+# connection never establishes on the SH-ESP32. This lever is impossible with the
+# precompiled arduino libs the default shesp32 env uses.
+CONFIG_MBEDTLS_DYNAMIC_BUFFER=y
