@@ -248,3 +248,52 @@ access request approved, data flowing, zero mbedtls alloc failures.
 Deploy note: the flashed firmware combines this deploy config (PR #4) with the
 heading-metadata + OTA-password feature work on fix/sk-heading-metadata; both
 reach main via their PRs, after which main == deployed.
+
+## 2026-06-25 — deep debugging session: WS freeze, event-loop stall, GSV, heading
+
+Started from "satellitesInView flashes in the SK data browser"; pulled the thread
+into several distinct problems. Net firmware change here is small (logging level +
+WS buffer flag + UART RX buffer); the real fixes landed upstream in SensESP.
+
+**SK WebSocket freeze (all deltas stalled 10-50 s).** The connection dropped and
+reconnected continuously. Root cause: a Signal K delta larger than
+esp_websocket_client's hardcoded 1024 B buffer is sent as several non-blocking
+transport writes; a later chunk that isn't instantly writable makes the client
+abort the (healthy) connection. This device's connect-time metadata delta plus a
+full-sky satellitesInView reach ~7 KB, so nearly every connect failed. Fixed in
+SensESP (PR SignalK/SensESP#1043): buffer size is now the build-flag
+SENSESP_SK_WS_BUFFER_SIZE (default 1024, small for ESP32-C3), and send_delta drops
+an oversize delta instead of killing the connection. This firmware sets
+`-D SENSESP_SK_WS_BUFFER_SIZE=8192`.
+
+**Event-loop stall -> UART corruption.** The main loop stalled up to ~600 ms,
+starving the UART reader and corrupting (~merging) NMEA sentences. Cause: at debug
+log level SensESP writes every NMEA line and every full ~7 KB delta synchronously
+to the 115200 console; 7 KB at 115200 ~= 600 ms of blocking. Fix:
+SetupLogging(ESP_LOG_INFO) + CORE_DEBUG_LEVEL=INFO. Max loop tick 616 ms -> 33 ms;
+checksum errors 0.6/s -> 0.15/s. The residual (~0.15/s, harmless) is filed as
+hatlabs/gnss-rtk-compass#6 (suspected HW-FIFO/ISR-latency, not ring-buffer; the
+1 KB Serial2.setRxBufferSize didn't change it). Foundational follow-up if wanted:
+make SensESP console logging non-blocking so VERBOSE can't stall the loop.
+
+**satellitesInView "flashing".** Real bug: SensESP/NMEA0183 GSVSentenceParser
+anchored the cycle on a fixed first-sentence type, so it emitted partial fragments
+mid-cycle. Fixed (PR SensESP/NMEA0183#37) by detecting the cycle boundary via a
+(system,signal) group repeating (seen-set); also stopped GSV feeding
+navigation.gnss.satellites (GGA-only = satellites in use). Device now emits one
+merged delta per cycle (~60 sats). NOTE: a later "still over-emits ~5/s" reading
+was a measurement error -- see below.
+
+**Heading "missing on SK" -> server config, not firmware.** The device computes
+heading correctly (HPR trace: RTK-fixed, 10 Hz) and publishes navigation.headingTrue
+(WS) + PGN 127250 (N2khr_true). It was absent from the server's headingTrue path
+because of a Signal K "Source Priorities" setting pinning derived-data. Removing
+that surfaced the device. The compass read ~180 deg off the boat's other compass
+(experimental/temporary antenna install, mounted front-to-back) -- worked around
+with a 180 deg heading offset in the device config.
+
+**Cross-cutting lesson:** this boat's SK server merges many sources per path
+(OpenPlotter GPSD, several N2K devices, derived-data, and this device). The REST
+API returns the highest-priority $source, NOT necessarily this device. Two wrong
+conclusions (GSV "over-emit", heading "lag") came from reading another source.
+Always filter SK verification by the device's own ws.* source.

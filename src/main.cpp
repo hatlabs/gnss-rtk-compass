@@ -8,6 +8,8 @@
 // anti-spoof, smoothing) are applied and ACK-confirmed before any output is
 // wired, so no heading/position is published until the module is configured.
 
+#include <time.h>
+
 #include <memory>
 #include <vector>
 
@@ -30,6 +32,33 @@ using namespace sensesp;
 using namespace sensesp::nmea0183;
 using namespace gnss_rtk_compass;
 
+namespace sensesp {
+// Serialise the satellite list as a Signal K navigation.gnss.satellitesInView
+// object ({count, satellites[]}); the generic SKOutput body can't convert a
+// std::vector, so this specialisation (declared before the type is instantiated
+// in CreateSKOutputs) replaces it -- the same pattern the library uses for
+// SKOutput<Position>.
+template <>
+void SKOutput<std::vector<nmea0183::GNSSSatellite>>::as_signalk_json(
+    JsonDocument& doc) {
+  doc["path"] = this->get_sk_path();
+  JsonObject value = doc["value"].to<JsonObject>();
+  value["count"] = static_cast<int>(output_.size());
+  JsonArray arr = value["satellites"].to<JsonArray>();
+  for (const auto& s : output_) {
+    JsonObject o = arr.add<JsonObject>();
+    o["id"] = s.id;
+    if (s.elevation.is_valid()) {
+      o["elevation"] = static_cast<float>(s.elevation) * DEG_TO_RAD;
+    }
+    if (s.azimuth.is_valid()) {
+      o["azimuth"] = static_cast<float>(s.azimuth) * DEG_TO_RAD;
+    }
+    o["SNR"] = s.snr;
+  }
+}
+}  // namespace sensesp
+
 // UM982 UART, ESP32 side. RX21 <- UM982 TXD, TX18 -> UM982 RXD.
 constexpr int kUM982RxPin = 21;
 constexpr int kUM982TxPin = 18;
@@ -48,9 +77,62 @@ std::shared_ptr<GNSSData> gnss_data;
 std::shared_ptr<UnicoreHPRSentenceParser> hpr;
 std::shared_ptr<N2kSenders> n2k;
 
+// Signal K outputs. Constructed in setup() -- before SKDeltaQueue snapshots the
+// emitter list on the first event-loop tick -- and connected to the parsers
+// later in WireOutputs(). Building them in WireOutputs() (after the boot config)
+// is too late: they would never be attached to the delta queue, so no deltas are
+// ever sent.
+std::shared_ptr<SKOutputFloat> sk_heading;
+std::shared_ptr<SKOutputAttitudeVector> sk_attitude;
+std::shared_ptr<SKOutputString> sk_heading_quality;
+std::shared_ptr<SKOutputPosition> sk_position;
+std::shared_ptr<SKOutputFloat> sk_sog;
+std::shared_ptr<SKOutputFloat> sk_cog;
+std::shared_ptr<SKOutputInt> sk_satellites;
+std::shared_ptr<SKOutputFloat> sk_hdop;
+std::shared_ptr<SKOutputString> sk_datetime;
+std::shared_ptr<SKOutput<std::vector<GNSSSatellite>>> sk_satellites_in_view;
+
 // Boot-config sequencer state.
 volatile int boot_index = 0;
 volatile bool boot_active = false;
+
+// UTC seconds -> ISO 8601 for navigation.datetime.
+String TimeToISO8601(const time_t& t) {
+  if (t == 0) {
+    return String("");
+  }
+  struct tm tm_utc;
+  gmtime_r(&t, &tm_utc);
+  char buf[24];
+  strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &tm_utc);
+  return String(buf);
+}
+
+// Construct the Signal K outputs. Must run in setup() (see the declarations).
+void CreateSKOutputs() {
+  sk_heading = std::make_shared<SKOutputFloat>("navigation.headingTrue",
+                                               "/SK Path/Heading True");
+  sk_attitude = std::make_shared<SKOutputAttitudeVector>(
+      "navigation.attitude", "/SK Path/Attitude");
+  sk_heading_quality = std::make_shared<SKOutputString>(
+      "navigation.gnss.headingQuality", "/SK Path/Heading Quality");
+  sk_position = std::make_shared<SKOutputPosition>("navigation.position",
+                                                   "/SK Path/Position");
+  sk_sog = std::make_shared<SKOutputFloat>("navigation.speedOverGround",
+                                           "/SK Path/SOG");
+  sk_cog = std::make_shared<SKOutputFloat>("navigation.courseOverGroundTrue",
+                                           "/SK Path/COG");
+  sk_satellites = std::make_shared<SKOutputInt>("navigation.gnss.satellites",
+                                                "/SK Path/Satellites");
+  sk_hdop = std::make_shared<SKOutputFloat>("navigation.gnss.horizontalDilution",
+                                            "/SK Path/HDOP");
+  sk_datetime = std::make_shared<SKOutputString>("navigation.datetime",
+                                                 "/SK Path/Datetime");
+  sk_satellites_in_view =
+      std::make_shared<SKOutput<std::vector<GNSSSatellite>>>(
+          "navigation.gnss.satellitesInView", "/SK Path/Satellites In View");
+}
 
 // Enable the NMEA output sentences once the module is configured. Period
 // argument is in seconds (0.1 = 10 Hz).
@@ -72,32 +154,36 @@ void WireOutputs() {
 
   hpr = std::make_shared<UnicoreHPRSentenceParser>(parser);
 
-  // True heading (already offset-corrected on the module) feeds SK and N2K.
+  // True heading (already offset-corrected on the module) feeds SK and N2K. The
+  // parser only emits attitude_ once the dual-antenna baseline is RTK-solved.
   auto yaw = std::make_shared<LambdaTransform<AttitudeVector, float>>(
       [](const AttitudeVector& a) { return a.yaw; });
   hpr->attitude_.connect_to(yaw);
-
-  auto sk_heading = std::make_shared<SKOutputFloat>("navigation.headingTrue",
-                                                    "/SK Path/Heading True");
-  SKMetadata heading_meta("rad", "True Heading", "GNSS dual-antenna true heading",
-                          "Heading", 30);
-  sk_heading->set_metadata(&heading_meta);
   yaw->connect_to(sk_heading);
   yaw->connect_to(&n2k->heading_);
 
-  hpr->attitude_.connect_to(std::make_shared<SKOutputAttitudeVector>(
-      "navigation.attitude", "/SK Path/Attitude"));
+  hpr->attitude_.connect_to(sk_attitude);
   hpr->attitude_.connect_to(&n2k->attitude_);
 
-  hpr->heading_quality_.connect_to(std::make_shared<SKOutputString>(
-      "navigation.gnss.headingQuality", "/SK Path/Heading Quality"));
+  hpr->heading_quality_.connect_to(sk_heading_quality);
 
+  // GNSS position, velocity, fix quality and constellation -- to both SK and N2K.
+  gnss_data->position.connect_to(sk_position);
   gnss_data->position.connect_to(&n2k->position_);
-  gnss_data->true_course.connect_to(&n2k->cog_);
+  gnss_data->speed.connect_to(sk_sog);
   gnss_data->speed.connect_to(&n2k->sog_);
+  gnss_data->true_course.connect_to(sk_cog);
+  gnss_data->true_course.connect_to(&n2k->cog_);
+  gnss_data->num_satellites.connect_to(sk_satellites);
   gnss_data->num_satellites.connect_to(&n2k->num_satellites_);
+  gnss_data->horizontal_dilution.connect_to(sk_hdop);
   gnss_data->horizontal_dilution.connect_to(&n2k->hdop_);
   gnss_data->datetime.connect_to(&n2k->datetime_);
+  auto datetime_iso = std::make_shared<LambdaTransform<time_t, String>>(
+      [](const time_t& t) { return TimeToISO8601(t); });
+  gnss_data->datetime.connect_to(datetime_iso);
+  datetime_iso->connect_to(sk_datetime);
+  gnss_data->satellites.connect_to(sk_satellites_in_view);
   gnss_data->satellites.connect_to(&n2k->satellites_);
 
   // Inputs are wired; start publishing N2K now (the bus/diagnostics already came
@@ -150,11 +236,17 @@ void OnBootAck(bool ok) {
 }
 
 void setup() {
-  SetupLogging();
+  // Log at INFO, not the default DEBUG: at DEBUG every NMEA line and every full
+  // Signal K delta (kilobytes) is written synchronously to the 115200 console,
+  // which blocks the event loop for hundreds of ms and corrupts UART input.
+  SetupLogging(ESP_LOG_INFO);
 
   pinMode(kUM982ResetPin, OUTPUT);
   digitalWrite(kUM982ResetPin, HIGH);  // release reset (active low)
 
+  // Enlarge the RX ring buffer (default 256 B ~= 22 ms at 115200) so a brief
+  // event-loop stall doesn't overrun it and merge/corrupt UM982 sentences.
+  Serial2.setRxBufferSize(1024);
   Serial2.begin(kUM982BaudRate, SERIAL_8N1, kUM982RxPin, kUM982TxPin);
 
   SensESPAppBuilder builder;
@@ -169,6 +261,12 @@ void setup() {
   nmea_io = std::make_shared<NMEA0183IO>(&Serial2);
   ack_parser = std::make_shared<UM982CommandAckParser>(&nmea_io->parser_);
   ack_parser->connect_to(std::make_shared<LambdaConsumer<bool>>(OnBootAck));
+
+  // Debug aid: log every raw line read from the UM982 (gated at debug level) so
+  // reception is visible on /api/log and serial -- distinguishes "no sentences
+  // arriving" from "arriving but not parsed/emitted".
+  nmea_io->line_producer_->connect_to(std::make_shared<LambdaConsumer<String>>(
+      [](String line) { ESP_LOGD("NMEA0183", "RX: %s", line.c_str()); }));
 
   // UM982 device settings, configurable from the web UI. Each save() sends the
   // command and waits for the module ACK; the boot sequence applies them all.
@@ -259,6 +357,11 @@ void setup() {
   // configuration (enable_senders(), called from WireOutputs()).
   n2k = std::make_shared<N2kSenders>(
       static_cast<uint8_t>(n2k_address->get_value()));
+
+  // Construct the Signal K outputs now, before the event loop starts, so they
+  // register with the SK delta queue. WireOutputs() connects them once the UM982
+  // is configured.
+  CreateSKOutputs();
 
   // Heap and main-loop-stack diagnostics on /api/info (parity with ais/wind).
   auto largest_block_status = std::make_shared<StatusPageItem<int>>(
