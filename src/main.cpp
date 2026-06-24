@@ -17,6 +17,7 @@
 #include "sensesp/system/lambda_consumer.h"
 #include "sensesp/transforms/lambda_transform.h"
 #include "sensesp/ui/config_item.h"
+#include "sensesp/ui/status_page_item.h"
 #include "sensesp_app_builder.h"
 #include "sensesp_nmea0183/nmea0183.h"
 #include "sensesp_nmea0183/wiring.h"
@@ -39,7 +40,7 @@ constexpr uint32_t kUM982BaudRate = 115200;
 constexpr uint8_t kN2kSourceAddress = 25;
 
 // Program-lifetime roots (registered by raw pointer elsewhere).
-std::shared_ptr<NMEA0183IOTask> nmea_io;
+std::shared_ptr<NMEA0183IO> nmea_io;
 std::shared_ptr<UM982CommandAckParser> ack_parser;
 std::shared_ptr<IntConfig> n2k_address;
 std::vector<std::shared_ptr<UM982SettingBase>> um982_settings;
@@ -70,8 +71,6 @@ void WireOutputs() {
   ConnectGNSS(parser, gnss_data.get());
 
   hpr = std::make_shared<UnicoreHPRSentenceParser>(parser);
-  n2k = std::make_shared<N2kSenders>(
-      static_cast<uint8_t>(n2k_address->get_value()));
 
   // True heading (already offset-corrected on the module) feeds SK and N2K.
   auto yaw = std::make_shared<LambdaTransform<AttitudeVector, float>>(
@@ -100,6 +99,10 @@ void WireOutputs() {
   gnss_data->horizontal_dilution.connect_to(&n2k->hdop_);
   gnss_data->datetime.connect_to(&n2k->datetime_);
   gnss_data->satellites.connect_to(&n2k->satellites_);
+
+  // Inputs are wired; start publishing N2K now (the bus/diagnostics already came
+  // up in setup()).
+  n2k->enable_senders();
 
   EnableUM982Output();
   ESP_LOGI("UM982cfg", "Configuration complete; outputs enabled");
@@ -151,7 +154,10 @@ void setup() {
                     ->enable_ota("thisisfine")
                     ->get_app();
 
-  nmea_io = std::make_shared<NMEA0183IOTask>(&Serial2);
+  // Read NMEA 0183 on the main event loop (NMEA0183IO). The parser outputs feed
+  // the N2K senders and SK outputs directly, so reading off a separate task is a
+  // cross-core hazard; NMEA0183IO keeps the whole path single-threaded.
+  nmea_io = std::make_shared<NMEA0183IO>(&Serial2);
   ack_parser = std::make_shared<UM982CommandAckParser>(&nmea_io->parser_);
   ack_parser->connect_to(std::make_shared<LambdaConsumer<bool>>(OnBootAck));
 
@@ -236,6 +242,28 @@ void setup() {
           "effect after a restart.")
       ->set_requires_restart(true)
       ->set_sort_order(300);
+
+  // Bring up NMEA 2000 (bus, message counters, watchdog) now, before the event
+  // loop starts ticking -- so the status/config registries are populated before
+  // the HTTP server serves, and the bus + watchdog exist regardless of whether
+  // the UM982 boot config later succeeds. Only the data senders are gated on
+  // configuration (enable_senders(), called from WireOutputs()).
+  n2k = std::make_shared<N2kSenders>(
+      static_cast<uint8_t>(n2k_address->get_value()));
+
+  // Heap and main-loop-stack diagnostics on /api/info (parity with ais/wind).
+  auto largest_block_status = std::make_shared<StatusPageItem<int>>(
+      "Largest free block (bytes)", 0, "System", 250);
+  event_loop()->onRepeat(2000, [largest_block_status]() {
+    largest_block_status->set(static_cast<int>(ESP.getMaxAllocHeap()));
+  });
+
+  auto main_loop_stack_status = std::make_shared<StatusPageItem<int>>(
+      "Main loop min free stack (bytes)", 0, "System", 260);
+  event_loop()->onRepeat(2000, [main_loop_stack_status]() {
+    main_loop_stack_status->set(
+        static_cast<int>(uxTaskGetStackHighWaterMark(nullptr)));
+  });
 
   // Give the module time to boot, then apply config; outputs wire up once all
   // settings are ACK'd.

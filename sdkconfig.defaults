@@ -24,3 +24,7 @@ CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024
 # connection never establishes on the SH-ESP32. This lever is impossible with the
 # precompiled arduino libs the default shesp32 env uses.
 CONFIG_MBEDTLS_DYNAMIC_BUFFER=y
+
+# Enable uxTaskGetSystemState so SensESP's /api/info per-task stack report works
+# on this from-source build (default-on only in the precompiled arduino libs).
+CONFIG_FREERTOS_USE_TRACE_FACILITY=y

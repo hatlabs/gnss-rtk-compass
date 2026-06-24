@@ -26,7 +26,14 @@ using namespace sensesp;
  */
 class N2kSenders {
  public:
+  // The constructor brings up the N2K bus, message counters, and watchdog (call
+  // it from setup(), before the event loop starts, so the status/config
+  // registries are populated before the HTTP server serves). The periodic
+  // data-publishing senders stay dark until enable_senders() is called -- gate
+  // that on the sensor being configured so no nav data is published early.
   explicit N2kSenders(uint8_t source_address);
+
+  void enable_senders();
 
   LambdaConsumer<float> heading_;            // true heading, rad
   LambdaConsumer<AttitudeVector> attitude_;  // yaw/pitch/roll, rad
