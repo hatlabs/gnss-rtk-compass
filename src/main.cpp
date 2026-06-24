@@ -112,15 +112,20 @@ void WireOutputs() {
 // the moment an ACK arrives (see OnBootAck); the timeout only resends a command
 // that went unanswered, so a slow/absent module self-heals and outputs stay
 // dark until every setting is confirmed.
-void SendBootStep() {
-  int step = boot_index;
+void SendBootStep(int step) {
+  // The UM982 can answer with a burst of ACKs that advances boot_index past the
+  // last setting before this queued send runs; bail rather than indexing out of
+  // bounds (the LoadProhibited crash this guard replaced).
+  if (step < 0 || step >= (int)um982_settings.size()) {
+    return;
+  }
   String command = um982_settings[step]->command();
-  ESP_LOGI("UM982cfg", "Applying: %s", command.c_str());
+  ESP_LOGI("UM982cfg", "Applying [%d]: %s", step, command.c_str());
   nmea_io->set(command);
   event_loop()->onDelay(2500, [step]() {
     if (boot_active && boot_index == step) {
       ESP_LOGW("UM982cfg", "No ACK for step %d, retrying", step);
-      SendBootStep();
+      SendBootStep(step);
     }
   });
 }
@@ -136,7 +141,11 @@ void OnBootAck(bool ok) {
     boot_active = false;
     event_loop()->onDelay(0, []() { WireOutputs(); });
   } else {
-    event_loop()->onDelay(0, []() { SendBootStep(); });
+    // Capture the target step: another ACK may advance boot_index again before
+    // this runs, so each queued send must apply ITS command rather than whatever
+    // boot_index has since become -- otherwise a burst of ACKs skips settings.
+    int next = boot_index;
+    event_loop()->onDelay(0, [next]() { SendBootStep(next); });
   }
 }
 
@@ -268,7 +277,7 @@ void setup() {
   // Give the module time to boot, then apply config; outputs wire up once all
   // settings are ACK'd.
   boot_active = true;
-  event_loop()->onDelay(500, []() { SendBootStep(); });
+  event_loop()->onDelay(500, []() { SendBootStep(0); });
 }
 
 void loop() { event_loop()->tick(); }
