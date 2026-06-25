@@ -236,11 +236,17 @@ void OnBootAck(bool ok) {
 }
 
 void setup() {
-  SetupLogging();
+  // Log at INFO, not the default DEBUG: at DEBUG every NMEA line and every full
+  // Signal K delta (kilobytes) is written synchronously to the 115200 console,
+  // which blocks the event loop for hundreds of ms and corrupts UART input.
+  SetupLogging(ESP_LOG_INFO);
 
   pinMode(kUM982ResetPin, OUTPUT);
   digitalWrite(kUM982ResetPin, HIGH);  // release reset (active low)
 
+  // Enlarge the RX ring buffer (default 256 B ~= 22 ms at 115200) so a brief
+  // event-loop stall doesn't overrun it and merge/corrupt UM982 sentences.
+  Serial2.setRxBufferSize(1024);
   Serial2.begin(kUM982BaudRate, SERIAL_8N1, kUM982RxPin, kUM982TxPin);
 
   SensESPAppBuilder builder;
