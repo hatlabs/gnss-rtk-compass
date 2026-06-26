@@ -92,11 +92,11 @@ class UM982Setting : public FileSystemSaveable,
  public:
   using Builder = String (*)(const T&);
 
-  UM982Setting(nmea0183::NMEA0183IO* io_task, UM982CommandAckParser* ack,
+  UM982Setting(nmea0183::NMEA0183IO* io, UM982CommandAckParser* ack,
                T default_value, Builder builder, const char* json_key,
                const char* schema, String config_path)
       : FileSystemSaveable(config_path),
-        io_task_{io_task},
+        io_{io},
         value_{default_value},
         builder_{builder},
         json_key_{json_key},
@@ -126,12 +126,12 @@ class UM982Setting : public FileSystemSaveable,
     FileSystemSaveable::save();
     String sentence = command();
     ack_semaphore_.clear();
-    event_loop()->onDelay(0, [this, sentence]() { io_task_->set(sentence); });
+    event_loop()->onDelay(0, [this, sentence]() { io_->set(sentence); });
     return ack_semaphore_.take(2000);
   }
 
  protected:
-  nmea0183::NMEA0183IO* io_task_;
+  nmea0183::NMEA0183IO* io_;
   T value_;
   Builder builder_;
   const char* json_key_;
