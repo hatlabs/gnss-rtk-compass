@@ -18,9 +18,11 @@ using namespace sensesp;
 /**
  * @brief Parses UM982 command acknowledgements.
  *
- * The module echoes accepted commands as "$command,<cmd>,response: OK*cs".
- * Emits true on OK, false otherwise. Checksum is ignored; the response content
- * is what matters.
+ * The module echoes accepted commands as "$command,<cmd>,response: OK*cs"
+ * (field[0] "$command", field[1] the command verbatim, last field the response).
+ * Emits true on OK, false otherwise, and exposes the echoed command via
+ * last_command() so the boot sequencer can confirm which command an ACK is for.
+ * Checksum is ignored; the response content is what matters.
  */
 class UM982CommandAckParser : public nmea0183::SentenceParser {
  public:
@@ -33,12 +35,19 @@ class UM982CommandAckParser : public nmea0183::SentenceParser {
     if (num_fields < 3) {
       return false;
     }
+    nmea0183::ParseString(&last_command_, field_strings + field_offsets[1]);
     String response;
     nmea0183::ParseString(&response,
                           field_strings + field_offsets[num_fields - 1]);
     emit(response.indexOf("OK") >= 0);
     return true;
   }
+
+  // The command echoed by the most recent ACK (valid when the bool emit fires).
+  const String& last_command() const { return last_command_; }
+
+ private:
+  String last_command_;
 };
 
 // --- Command builders -----------------------------------------------------

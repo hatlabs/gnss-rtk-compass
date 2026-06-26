@@ -216,10 +216,18 @@ void SendBootStep(int step) {
   });
 }
 
-// Called on every command ACK. During boot, advance to the next setting
-// immediately (or wire outputs once all are confirmed).
+// Called on every command ACK. During boot, advance to the next setting once
+// the awaited command is confirmed (or wire outputs when all are confirmed).
 void OnBootAck(bool ok) {
   if (!boot_active || !ok) {
+    return;
+  }
+  // Advance only when the ACK echoes the command this step is waiting on. The
+  // UM982 echoes the accepted command verbatim, so matching it makes the
+  // sequence idempotent per command: a duplicate ACK from a retried send, or a
+  // stray ACK from a web-UI save during boot, is ignored rather than advancing
+  // the sequence and leaving a later setting unconfirmed.
+  if (ack_parser->last_command() != um982_settings[boot_index]->command()) {
     return;
   }
   boot_index++;
@@ -227,9 +235,6 @@ void OnBootAck(bool ok) {
     boot_active = false;
     event_loop()->onDelay(0, []() { WireOutputs(); });
   } else {
-    // Capture the target step: another ACK may advance boot_index again before
-    // this runs, so each queued send must apply ITS command rather than whatever
-    // boot_index has since become -- otherwise a burst of ACKs skips settings.
     int next = boot_index;
     event_loop()->onDelay(0, [next]() { SendBootStep(next); });
   }
