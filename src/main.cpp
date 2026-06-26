@@ -8,6 +8,8 @@
 // anti-spoof, smoothing) are applied and ACK-confirmed before any output is
 // wired, so no heading/position is published until the module is configured.
 
+#include <time.h>
+
 #include <memory>
 #include <vector>
 
@@ -33,12 +35,11 @@ using namespace gnss_rtk_compass;
 namespace sensesp {
 // Serialise navigation.gnss.satellitesInView as the canonical Signal K object
 // {count, satellites:[{id, elevation(rad), azimuth(rad), SNR}]}. The library's
-// generic SKOutput<std::vector<GNSSSatellite>> emits a bare array of raw-degree
-// entries instead, which is the form ConnectGNSS() would otherwise publish. This
-// explicit specialisation overrides that member for the single satellitesInView
-// emitter ConnectGNSS creates -- the strong specialisation symbol wins over the
-// library TU's implicit instantiation. (The fully ODR-clean fix is a serializer
-// in SensESP/NMEA0183 itself; until then this is the one override point.)
+// generic SKOutput<std::vector<GNSSSatellite>> serialises the vector as a bare
+// array of raw-degree entries, so this explicit specialisation replaces that
+// member for the firmware's own satellitesInView output (sk_satellites_in_view).
+// (The fully ODR-clean fix is a serializer in SensESP/NMEA0183 itself; until
+// then the strong specialisation symbol applies wherever the type is used.)
 template <>
 void SKOutput<std::vector<nmea0183::GNSSSatellite>>::as_signalk_json(
     JsonDocument& doc) {
@@ -78,23 +79,41 @@ std::shared_ptr<GNSSData> gnss_data;
 std::shared_ptr<UnicoreHPRSentenceParser> hpr;
 std::shared_ptr<N2kSenders> n2k;
 
-// HPR-derived Signal K outputs (heading/attitude/heading quality). The GNSS
-// paths (position, speed, course, satellites, dilution, datetime,
-// satellitesInView) are owned by ConnectGNSS() in WireOutputs() -- they are not
-// duplicated here. Constructed in setup() -- before SKDeltaQueue snapshots the
-// emitter list on the first event-loop tick -- and connected in WireOutputs().
-// Building them in WireOutputs() (after the boot config) is too late: they would
-// never be attached to the delta queue, so no deltas are ever sent.
+// Signal K outputs. Created in setup() (CreateSKOutputs), before the event loop
+// starts ticking, then connected to the parsers in WireOutputs() after the boot
+// config. The early creation is required: SKDeltaQueue::connect_emitters() runs
+// once at the first tick and attaches only the emitters that exist then, so an
+// SKOutput created later (e.g. by ConnectGNSS in WireOutputs) registers but
+// never sends value deltas. That is why the firmware owns these outputs rather
+// than relying on the ones ConnectGNSS builds.
 std::shared_ptr<SKOutputFloat> sk_heading;
 std::shared_ptr<SKOutputAttitudeVector> sk_attitude;
 std::shared_ptr<SKOutputString> sk_heading_quality;
+std::shared_ptr<SKOutputPosition> sk_position;
+std::shared_ptr<SKOutputFloat> sk_sog;
+std::shared_ptr<SKOutputFloat> sk_cog;
+std::shared_ptr<SKOutputInt> sk_satellites;
+std::shared_ptr<SKOutputFloat> sk_hdop;
+std::shared_ptr<SKOutputString> sk_datetime;
+std::shared_ptr<SKOutput<std::vector<GNSSSatellite>>> sk_satellites_in_view;
 
 // Boot-config sequencer state.
 volatile int boot_index = 0;
 volatile bool boot_active = false;
 
-// Construct the HPR-derived Signal K outputs. Must run in setup() (see the
-// declarations). The GNSS paths are created by ConnectGNSS() in WireOutputs().
+// UTC seconds -> ISO 8601 for navigation.datetime.
+String TimeToISO8601(const time_t& t) {
+  if (t == 0) {
+    return String("");
+  }
+  struct tm tm_utc;
+  gmtime_r(&t, &tm_utc);
+  char buf[24];
+  strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &tm_utc);
+  return String(buf);
+}
+
+// Construct the Signal K outputs. Must run in setup() (see the declarations).
 void CreateSKOutputs() {
   sk_heading = std::make_shared<SKOutputFloat>(
       "navigation.headingTrue", "/SK Path/Heading True",
@@ -104,6 +123,21 @@ void CreateSKOutputs() {
       "navigation.attitude", "/SK Path/Attitude");
   sk_heading_quality = std::make_shared<SKOutputString>(
       "navigation.gnss.headingQuality", "/SK Path/Heading Quality");
+  sk_position = std::make_shared<SKOutputPosition>("navigation.position",
+                                                   "/SK Path/Position");
+  sk_sog = std::make_shared<SKOutputFloat>("navigation.speedOverGround",
+                                           "/SK Path/SOG");
+  sk_cog = std::make_shared<SKOutputFloat>("navigation.courseOverGroundTrue",
+                                           "/SK Path/COG");
+  sk_satellites = std::make_shared<SKOutputInt>("navigation.gnss.satellites",
+                                                "/SK Path/Satellites");
+  sk_hdop = std::make_shared<SKOutputFloat>("navigation.gnss.horizontalDilution",
+                                            "/SK Path/HDOP");
+  sk_datetime = std::make_shared<SKOutputString>("navigation.datetime",
+                                                 "/SK Path/Datetime");
+  sk_satellites_in_view =
+      std::make_shared<SKOutput<std::vector<GNSSSatellite>>>(
+          "navigation.gnss.satellitesInView", "/SK Path/Satellites In View");
 }
 
 // Enable the NMEA output sentences once the module is configured. Period
@@ -139,15 +173,27 @@ void WireOutputs() {
 
   hpr->heading_quality_.connect_to(sk_heading_quality);
 
-  // GNSS data goes to Signal K through ConnectGNSS() above (the satellitesInView
-  // serialisation is reshaped by the SKOutput specialisation at the top of this
-  // file). Here we only fan the same parsed values out to the N2K senders.
+  // GNSS position, velocity, fix quality and constellation -- to both SK and
+  // N2K. The SK outputs are the firmware's own, created early in setup() so they
+  // attach to the delta queue (the ones ConnectGNSS builds here are never
+  // attached and stay dark -- see CreateSKOutputs). satellitesInView uses the
+  // object-form specialisation at the top of this file.
+  gnss_data->position.connect_to(sk_position);
   gnss_data->position.connect_to(&n2k->position_);
+  gnss_data->speed.connect_to(sk_sog);
   gnss_data->speed.connect_to(&n2k->sog_);
+  gnss_data->true_course.connect_to(sk_cog);
   gnss_data->true_course.connect_to(&n2k->cog_);
+  gnss_data->num_satellites.connect_to(sk_satellites);
   gnss_data->num_satellites.connect_to(&n2k->num_satellites_);
+  gnss_data->horizontal_dilution.connect_to(sk_hdop);
   gnss_data->horizontal_dilution.connect_to(&n2k->hdop_);
   gnss_data->datetime.connect_to(&n2k->datetime_);
+  auto datetime_iso = std::make_shared<LambdaTransform<time_t, String>>(
+      [](const time_t& t) { return TimeToISO8601(t); });
+  gnss_data->datetime.connect_to(datetime_iso);
+  datetime_iso->connect_to(sk_datetime);
+  gnss_data->satellites.connect_to(sk_satellites_in_view);
   gnss_data->satellites.connect_to(&n2k->satellites_);
 
   // Inputs are wired; start publishing N2K now (the bus/diagnostics already came
