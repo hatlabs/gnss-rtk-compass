@@ -222,11 +222,11 @@ void OnBootAck(bool ok) {
   if (!boot_active || !ok) {
     return;
   }
-  // Advance only when the ACK echoes the command this step is waiting on. The
-  // UM982 echoes the accepted command verbatim, so matching it makes the
-  // sequence idempotent per command: a duplicate ACK from a retried send, or a
-  // stray ACK from a web-UI save during boot, is ignored rather than advancing
-  // the sequence and leaving a later setting unconfirmed.
+  // Advance only when the ACK echoes the command this step is waiting on (the
+  // UM982 echoes the accepted command verbatim). Any other ACK -- a duplicate
+  // from a retried send, or a stray ACK from a web-UI save during boot -- is
+  // ignored rather than advancing the sequence and leaving a later setting
+  // unconfirmed.
   if (ack_parser->last_command() != um982_settings[boot_index]->command()) {
     return;
   }
@@ -235,6 +235,8 @@ void OnBootAck(bool ok) {
     boot_active = false;
     event_loop()->onDelay(0, []() { WireOutputs(); });
   } else {
+    // Snapshot the step: another ACK can advance boot_index before this deferred
+    // send runs.
     int next = boot_index;
     event_loop()->onDelay(0, [next]() { SendBootStep(next); });
   }

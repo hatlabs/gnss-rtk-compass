@@ -39,8 +39,12 @@ class UM982CommandAckParser : public nmea0183::SentenceParser {
     String response;
     nmea0183::ParseString(&response,
                           field_strings + field_offsets[num_fields - 1]);
-    emit(response.indexOf("OK") >= 0);
-    return true;
+    // Return the OK-ness, not a bare true: SentenceParser::parse() emits true on
+    // any true return, which would re-fire consumers with a hardcoded true and
+    // advance the boot sequence even on a rejection. Returning ok suppresses it.
+    bool ok = response.indexOf("OK") >= 0;
+    emit(ok);
+    return ok;
   }
 
   // The command echoed by the most recent ACK (valid when the bool emit fires).
