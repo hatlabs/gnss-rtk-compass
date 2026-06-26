@@ -97,6 +97,8 @@ N2kSenders::N2kSenders(uint8_t source_address)
       ->set_title("NMEA 2000 Watchdog")
       ->set_description(
           "Reboot the device if no NMEA 2000 message is received for two "
+          "minutes. Only enable on a bus with other active talkers -- on a bus "
+          "where this device is the sole talker it will reboot every two "
           "minutes. Requires a restart to take effect.")
       ->set_sort_order(320);
   if (n2k_watchdog_config->get_value()) {
@@ -111,8 +113,14 @@ N2kSenders::N2kSenders(uint8_t source_address)
 }
 
 // Periodic data-publishing senders. Started from WireOutputs() only after the
-// UM982 is configured, so no nav data is published before then.
+// UM982 is configured, so no nav data is published before then. Idempotent: a
+// second call is a no-op rather than registering a duplicate set of senders.
 void N2kSenders::enable_senders() {
+  if (senders_enabled_) {
+    return;
+  }
+  senders_enabled_ = true;
+
   auto* loop = event_loop().get();
 
   // PGN 127250 Vessel Heading (true).

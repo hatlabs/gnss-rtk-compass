@@ -46,6 +46,7 @@ class N2kSenders {
   LambdaConsumer<std::vector<nmea0183::GNSSSatellite>> satellites_;
 
  private:
+  bool senders_enabled_ = false;
   ExpiringValue<double> heading_v_;
   ExpiringValue<AttitudeVector> attitude_v_;
   ExpiringValue<Position> position_v_;
