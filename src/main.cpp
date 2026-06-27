@@ -206,6 +206,20 @@ void SendBootStep(int step) {
     return;
   }
   String command = um982_settings[step]->command();
+  if (command.isEmpty()) {
+    // A setting at its auto/default value (e.g. baseline length 0) has no command
+    // to push; advance without sending so a non-applicable step can't stall boot.
+    ESP_LOGI("UM982cfg", "Skipping [%d]: auto/default, nothing to send", step);
+    boot_index = step + 1;
+    if (boot_index >= (int)um982_settings.size()) {
+      boot_active = false;
+      event_loop()->onDelay(0, []() { WireOutputs(); });
+    } else {
+      int next = boot_index;
+      event_loop()->onDelay(0, [next]() { SendBootStep(next); });
+    }
+    return;
+  }
   ESP_LOGI("UM982cfg", "Applying [%d]: %s", step, command.c_str());
   nmea_io->set(command);
   event_loop()->onDelay(2500, [step]() {
@@ -219,16 +233,22 @@ void SendBootStep(int step) {
 // Called on every command ACK. During boot, advance to the next setting once
 // the awaited command is confirmed (or wire outputs when all are confirmed).
 void OnBootAck(bool ok) {
-  if (!boot_active || !ok) {
+  if (!boot_active) {
     return;
   }
-  // Advance only when the ACK echoes the command this step is waiting on (the
-  // UM982 echoes the accepted command verbatim). Any other ACK -- a duplicate
-  // from a retried send, or a stray ACK from a web-UI save during boot -- is
-  // ignored rather than advancing the sequence and leaving a later setting
-  // unconfirmed.
+  // Correlate: act only on the ACK for the command this step is waiting on (the
+  // UM982 echoes the accepted command verbatim). A duplicate from a retried send
+  // or a stray ACK from a web-UI save echoes a different command, so it is
+  // ignored rather than advancing the sequence.
   if (ack_parser->last_command() != um982_settings[boot_index]->command()) {
     return;
+  }
+  // An explicit rejection (echo matches, response not OK) is a definitive answer:
+  // resending the identical command only repeats the rejection, so advance rather
+  // than retry forever. The parser already logged the module's stated reason.
+  if (!ok) {
+    ESP_LOGW("UM982cfg", "Step %d (%s) rejected by module; skipping",
+             boot_index, um982_settings[boot_index]->command().c_str());
   }
   boot_index++;
   if (boot_index >= (int)um982_settings.size()) {
