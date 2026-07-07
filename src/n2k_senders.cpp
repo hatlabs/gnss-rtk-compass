@@ -25,6 +25,20 @@ constexpr unsigned long kExpiry = 2000;
 
 constexpr unsigned char kSID = 0xFF;  // sequence id unused
 
+// PGNs this device transmits, advertised on request via PGN 126464. A
+// translating gateway (e.g. the Raymarine Micro-Talk feeding Tacktick/Micronet)
+// forwards a device's data only if it declares the matching PGNs; passive
+// listeners like Signal K decode every frame regardless. Terminated with 0.
+const unsigned long kTransmitPGNs[] = {
+    127250UL,  // Vessel Heading
+    127257UL,  // Attitude
+    129025UL,  // Position, Rapid Update
+    129026UL,  // COG & SOG, Rapid Update
+    129029UL,  // GNSS Position Data
+    129539UL,  // GNSS DOP
+    129540UL,  // GNSS Satellites in View
+    0};
+
 std::shared_ptr<CountingNMEA2000> nmea2000;
 
 // N2K diagnostics surfaced on /api/info (parity with ais/wind).
@@ -74,6 +88,7 @@ N2kSenders::N2kSenders(uint8_t source_address)
     n2k_last_rx_ms = millis();
   });
   nmea2000->EnableForward(false);
+  nmea2000->ExtendTransmitMessages(kTransmitPGNs);
   nmea2000->Open();
 
   auto* loop = event_loop().get();
