@@ -80,6 +80,7 @@ during implementation.
 | Position | `navigation.position` |
 | Speed over ground | `navigation.speedOverGround` |
 | Course over ground | `navigation.courseOverGroundTrue` |
+| Magnetic variation | `navigation.magneticVariation` |
 | Fix / baseline quality | `navigation.gnss.methodQuality` (+ satellites, HDOP) |
 | Pitch / roll | `navigation.attitude` |
 
@@ -92,6 +93,11 @@ during implementation.
 | Position, rapid update | 129025 |
 | COG & SOG, rapid update | 129026 |
 | GNSS position data (incl. fix quality, sats) | 129029 |
+| GNSS DOPs | 129539 |
+| GNSS satellites in view | 129540 |
+| Magnetic variation | 127258 |
+| System time | 126992 |
+| Datum (WGS84) | 129044 |
 
 Device uses a unique N2K source address to avoid bus conflicts.
 
