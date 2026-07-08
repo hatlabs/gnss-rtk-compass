@@ -100,6 +100,7 @@ Signal K paths:
 | Position | `navigation.position` |
 | Speed over ground | `navigation.speedOverGround` |
 | Course over ground | `navigation.courseOverGroundTrue` |
+| Magnetic variation | `navigation.magneticVariation` |
 | Fix quality, satellites, HDOP | `navigation.gnss.*` |
 
 NMEA 2000 PGNs:
@@ -113,6 +114,9 @@ NMEA 2000 PGNs:
 | GNSS position data | 129029 |
 | GNSS DOPs | 129539 |
 | GNSS satellites in view | 129540 |
+| Magnetic variation | 127258 |
+| System time | 126992 |
+| Datum (WGS84) | 129044 |
 
 ## Building and flashing
 
