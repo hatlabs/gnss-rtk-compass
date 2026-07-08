@@ -88,6 +88,7 @@ std::shared_ptr<SKOutputString> sk_heading_quality;
 std::shared_ptr<SKOutputPosition> sk_position;
 std::shared_ptr<SKOutputFloat> sk_sog;
 std::shared_ptr<SKOutputFloat> sk_cog;
+std::shared_ptr<SKOutputFloat> sk_variation;
 std::shared_ptr<SKOutputInt> sk_satellites;
 std::shared_ptr<SKOutputFloat> sk_hdop;
 std::shared_ptr<SKOutputString> sk_datetime;
@@ -123,6 +124,8 @@ void CreateSKOutputs() {
                                            "/SK Path/SOG");
   sk_cog = std::make_shared<SKOutputFloat>("navigation.courseOverGroundTrue",
                                            "/SK Path/COG");
+  sk_variation = std::make_shared<SKOutputFloat>(
+      "navigation.magneticVariation", "/SK Path/Magnetic Variation");
   sk_satellites = std::make_shared<SKOutputInt>("navigation.gnss.satellites",
                                                 "/SK Path/Satellites");
   sk_hdop = std::make_shared<SKOutputFloat>("navigation.gnss.horizontalDilution",
@@ -174,6 +177,8 @@ void WireOutputs() {
   gnss_data->speed.connect_to(&n2k->sog_);
   gnss_data->true_course.connect_to(sk_cog);
   gnss_data->true_course.connect_to(&n2k->cog_);
+  gnss_data->variation.connect_to(sk_variation);
+  gnss_data->variation.connect_to(&n2k->variation_);
   gnss_data->num_satellites.connect_to(sk_satellites);
   gnss_data->num_satellites.connect_to(&n2k->num_satellites_);
   gnss_data->horizontal_dilution.connect_to(sk_hdop);
