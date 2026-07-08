@@ -43,6 +43,10 @@ class UM982CommandAckParser : public nmea0183::SentenceParser {
     // any true return, which would re-fire consumers with a hardcoded true and
     // advance the boot sequence even on a rejection. Returning ok suppresses it.
     bool ok = response.indexOf("OK") >= 0;
+    if (!ok) {
+      ESP_LOGW("UM982ack", "Command [%s] rejected by module: %s",
+               last_command_.c_str(), response.c_str());
+    }
     emit(ok);
     return ok;
   }
@@ -66,9 +70,14 @@ inline String UM982AntiSpoofCommand(const String& mode) {
   return "CONFIG ANTISPOOF " + mode;
 }
 inline String UM982BaselineLengthCommand(const int& length_cm) {
-  // 0 restores automatic baseline estimation.
+  // 0 = automatic baseline estimation. The UM982 rejects "CONFIG HEADING LENGTH 0"
+  // ("the second para > 0!"), so send nothing and let the module auto-solve the
+  // baseline in MODE HEADING2 FIXLENGTH. A positive value pins the length.
+  if (length_cm <= 0) {
+    return String();
+  }
   char buf[48];
-  snprintf(buf, sizeof(buf), "CONFIG HEADING LENGTH %d", length_cm > 0 ? length_cm : 0);
+  snprintf(buf, sizeof(buf), "CONFIG HEADING LENGTH %d", length_cm);
   return buf;
 }
 inline String UM982HeadingOffsetCommand(const float& heading_deg) {
@@ -138,6 +147,10 @@ class UM982Setting : public FileSystemSaveable,
   bool save() override {
     FileSystemSaveable::save();
     String sentence = command();
+    if (sentence.isEmpty()) {
+      // Auto/default value with no command to push; persist only.
+      return true;
+    }
     ack_semaphore_.clear();
     event_loop()->onDelay(0, [this, sentence]() { io_task_->set(sentence); });
     return ack_semaphore_.take(2000);
