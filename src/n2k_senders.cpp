@@ -23,12 +23,20 @@ constexpr gpio_num_t kCanRxPin = GPIO_NUM_34;
 // Inputs are considered stale after this long without an update.
 constexpr unsigned long kExpiry = 2000;
 
+// Magnetic variation expires far more slowly. The receiver fills the RMC
+// variation field only intermittently (~10-30 s) and declination is quasi-static,
+// so a long timeout bridges the gaps without flapping to not-available, yet still
+// degrades to not-available on a genuine dropout rather than holding a stale value.
+constexpr unsigned long kVariationExpiry = 60000;
+
 constexpr unsigned char kSID = 0xFF;  // sequence id unused
 
 // PGNs this device transmits, advertised on request via PGN 126464. A
 // translating gateway (e.g. the Raymarine Micro-Talk feeding Tacktick/Micronet)
 // forwards a device's data only if it declares the matching PGNs; passive
-// listeners like Signal K decode every frame regardless. Terminated with 0.
+// listeners like Signal K decode every frame regardless. Keep in sync with the
+// senders in enable_senders(): every PGN here needs a matching sender and vice
+// versa. Terminated with 0.
 const unsigned long kTransmitPGNs[] = {
     127250UL,  // Vessel Heading
     127257UL,  // Attitude
@@ -68,7 +76,7 @@ N2kSenders::N2kSenders(uint8_t source_address)
       satellites_([this](const std::vector<nmea0183::GNSSSatellite>& v) {
         satellites_v_.update(v);
       }),
-      variation_([this](float v) { variation_v_ = v; }),
+      variation_([this](float v) { variation_v_.update(v); }),
       heading_v_(N2kDoubleNA, kExpiry, N2kDoubleNA),
       attitude_v_(AttitudeVector(N2kDoubleNA, N2kDoubleNA, N2kDoubleNA), kExpiry,
                   AttitudeVector(N2kDoubleNA, N2kDoubleNA, N2kDoubleNA)),
@@ -80,7 +88,7 @@ N2kSenders::N2kSenders(uint8_t source_address)
       hdop_v_(N2kDoubleNA, kExpiry, N2kDoubleNA),
       datetime_v_(0, kExpiry, 0),
       satellites_v_({}, kExpiry, {}),
-      variation_v_(N2kDoubleNA) {
+      variation_v_(N2kDoubleNA, kVariationExpiry, N2kDoubleNA) {
   nmea2000 = std::make_shared<CountingNMEA2000>(kCanTxPin, kCanRxPin);
 
   nmea2000->SetProductInformation("00000001", 130, "GNSS RTK Compass", "1.0",
@@ -209,14 +217,16 @@ void N2kSenders::enable_senders() {
     nmea2000->SendMsg(msg);
   });
 
-  // PGN 127258 Magnetic Variation. Sourced from the receiver's GPRMC variation
-  // field, which arrives only intermittently; variation_v_ holds the last value
-  // (no expiry), so this carries a steady declination between updates rather than
-  // flapping to not-available. N2kDoubleNA until the first value is received.
+  // PGN 127258 Magnetic Variation. From the receiver's GPRMC variation field,
+  // which arrives only intermittently; variation_v_ bridges the gaps (long
+  // expiry) and goes not-available on a genuine dropout. The age-of-service date
+  // is not-available until a fix supplies the time (mirrors 126992 below).
   loop->onRepeat(1000, [this]() {
+    time_t t = datetime_v_.get();
     tN2kMsg msg;
     SetN2kMagneticVariation(msg, kSID, N2kmagvar_Calc,
-                            DaysSince1970(datetime_v_.get()), variation_v_);
+                            t == 0 ? N2kUInt16NA : DaysSince1970(t),
+                            variation_v_.get());
     nmea2000->SendMsg(msg);
   });
 
