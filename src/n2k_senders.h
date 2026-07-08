@@ -44,6 +44,7 @@ class N2kSenders {
   LambdaConsumer<float> hdop_;
   LambdaConsumer<time_t> datetime_;
   LambdaConsumer<std::vector<nmea0183::GNSSSatellite>> satellites_;
+  LambdaConsumer<float> variation_;  // magnetic variation, rad
 
  private:
   ExpiringValue<double> heading_v_;
@@ -55,6 +56,7 @@ class N2kSenders {
   ExpiringValue<double> hdop_v_;
   ExpiringValue<time_t> datetime_v_;
   ExpiringValue<std::vector<nmea0183::GNSSSatellite>> satellites_v_;
+  ExpiringValue<double> variation_v_;
 };
 
 }  // namespace gnss_rtk_compass
