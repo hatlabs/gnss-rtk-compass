@@ -56,7 +56,11 @@ class N2kSenders {
   ExpiringValue<double> hdop_v_;
   ExpiringValue<time_t> datetime_v_;
   ExpiringValue<std::vector<nmea0183::GNSSSatellite>> satellites_v_;
-  ExpiringValue<double> variation_v_;
+  // Magnetic variation is quasi-static and the receiver fills the RMC variation
+  // field only intermittently (~10 s), so hold the last value with no expiry --
+  // PGN 127258 then carries it steadily instead of flapping to not-available in
+  // the gaps. N2kDoubleNA until the first value arrives.
+  double variation_v_;
 };
 
 }  // namespace gnss_rtk_compass

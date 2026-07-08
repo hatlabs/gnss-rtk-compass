@@ -67,7 +67,7 @@ N2kSenders::N2kSenders(uint8_t source_address)
       satellites_([this](const std::vector<nmea0183::GNSSSatellite>& v) {
         satellites_v_.update(v);
       }),
-      variation_([this](float v) { variation_v_.update(v); }),
+      variation_([this](float v) { variation_v_ = v; }),
       heading_v_(N2kDoubleNA, kExpiry, N2kDoubleNA),
       attitude_v_(AttitudeVector(N2kDoubleNA, N2kDoubleNA, N2kDoubleNA), kExpiry,
                   AttitudeVector(N2kDoubleNA, N2kDoubleNA, N2kDoubleNA)),
@@ -79,7 +79,7 @@ N2kSenders::N2kSenders(uint8_t source_address)
       hdop_v_(N2kDoubleNA, kExpiry, N2kDoubleNA),
       datetime_v_(0, kExpiry, 0),
       satellites_v_({}, kExpiry, {}),
-      variation_v_(N2kDoubleNA, kExpiry, N2kDoubleNA) {
+      variation_v_(N2kDoubleNA) {
   nmea2000 = std::make_shared<CountingNMEA2000>(kCanTxPin, kCanRxPin);
 
   nmea2000->SetProductInformation("00000001", 130, "GNSS RTK Compass", "1.0",
@@ -209,13 +209,13 @@ void N2kSenders::enable_senders() {
   });
 
   // PGN 127258 Magnetic Variation. Sourced from the receiver's GPRMC variation
-  // field, which is not-available on receivers that don't compute declination;
-  // sent as N2kDoubleNA in that case (expires like the other inputs).
+  // field, which arrives only intermittently; variation_v_ holds the last value
+  // (no expiry), so this carries a steady declination between updates rather than
+  // flapping to not-available. N2kDoubleNA until the first value is received.
   loop->onRepeat(1000, [this]() {
     tN2kMsg msg;
     SetN2kMagneticVariation(msg, kSID, N2kmagvar_Calc,
-                            DaysSince1970(datetime_v_.get()),
-                            variation_v_.get());
+                            DaysSince1970(datetime_v_.get()), variation_v_);
     nmea2000->SendMsg(msg);
   });
 
