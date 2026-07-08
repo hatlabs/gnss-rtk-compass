@@ -39,6 +39,7 @@ const unsigned long kTransmitPGNs[] = {
     129540UL,  // GNSS Satellites in View
     127258UL,  // Magnetic Variation
     126992UL,  // System Time
+    129044UL,  // Datum
     0};
 
 std::shared_ptr<CountingNMEA2000> nmea2000;
@@ -229,6 +230,22 @@ void N2kSenders::enable_senders() {
     } else {
       SetN2kSystemTime(msg, kSID, DaysSince1970(t), SecondsSinceMidnight(t));
     }
+    nmea2000->SendMsg(msg);
+  });
+
+  // PGN 129044 Datum. Static WGS84 declaration (the datum our position PGNs are
+  // referenced to). The library has no setter, so hand-build it: Local Datum,
+  // three zero deltas (no offset from the reference), Reference Datum. Datum IDs
+  // are IHO S-60 codes -- "W84" is WGS84; the 4th byte is the subdivision (none).
+  loop->onRepeat(1000, [this]() {
+    tN2kMsg msg;
+    msg.SetPGN(129044L);
+    msg.Priority = 6;
+    msg.AddStr("W84", 4, false, ' ');  // Local Datum
+    msg.Add4ByteDouble(0.0, 1e-7);     // Delta Latitude
+    msg.Add4ByteDouble(0.0, 1e-7);     // Delta Longitude
+    msg.Add4ByteDouble(0.0, 0.01);     // Delta Altitude (cm)
+    msg.AddStr("W84", 4, false, ' ');  // Reference Datum
     nmea2000->SendMsg(msg);
   });
 }
