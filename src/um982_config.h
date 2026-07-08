@@ -66,9 +66,15 @@ inline String UM982AntiSpoofCommand(const String& mode) {
   return "CONFIG ANTISPOOF " + mode;
 }
 inline String UM982BaselineLengthCommand(const int& length_cm) {
-  // 0 restores automatic baseline estimation.
+  // 0 = automatic baseline estimation (the module default): push no command so
+  // the boot sequencer skips this step. "CONFIG HEADING LENGTH 0" is not
+  // reliably acknowledged by the module and stalls the ACK-gated boot sequence,
+  // which leaves all outputs unwired (no GPS, no NMEA 2000).
+  if (length_cm <= 0) {
+    return "";
+  }
   char buf[48];
-  snprintf(buf, sizeof(buf), "CONFIG HEADING LENGTH %d", length_cm > 0 ? length_cm : 0);
+  snprintf(buf, sizeof(buf), "CONFIG HEADING LENGTH %d", length_cm);
   return buf;
 }
 inline String UM982HeadingOffsetCommand(const float& heading_deg) {
@@ -138,6 +144,9 @@ class UM982Setting : public FileSystemSaveable,
   bool save() override {
     FileSystemSaveable::save();
     String sentence = command();
+    if (sentence.isEmpty()) {
+      return true;  // auto/default value: nothing to push to the module
+    }
     ack_semaphore_.clear();
     event_loop()->onDelay(0, [this, sentence]() { io_task_->set(sentence); });
     return ack_semaphore_.take(2000);
