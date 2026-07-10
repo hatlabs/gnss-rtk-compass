@@ -3,7 +3,7 @@
 A dual-antenna GNSS satellite compass for boats, built on the
 [SensESP](https://github.com/SignalK/SensESP) framework. A Unicore UM982
 module computes true heading from the baseline vector between its two
-antennas, and an SH-ESP32 publishes heading, attitude, position, speed,
+antennas, and an SH-ESP32 publishes heading, rate of turn, position, speed,
 course, and fix quality to both Signal K (over WiFi) and NMEA 2000.
 
 Because heading comes from satellite geometry, there is no magnetic
@@ -95,7 +95,7 @@ Signal K paths:
 | Data | Path |
 |------|------|
 | True heading | `navigation.headingTrue` |
-| Attitude (yaw/pitch/roll) | `navigation.attitude` |
+| Rate of turn | `navigation.rateOfTurn` |
 | Heading solution quality | `navigation.gnss.headingQuality` |
 | Position | `navigation.position` |
 | Speed over ground | `navigation.speedOverGround` |
@@ -108,7 +108,7 @@ NMEA 2000 PGNs:
 | Data | PGN |
 |------|-----|
 | Vessel heading (true) | 127250 |
-| Attitude | 127257 |
+| Rate of turn | 127251 |
 | Position, rapid update | 129025 |
 | COG & SOG, rapid update | 129026 |
 | GNSS position data | 129029 |

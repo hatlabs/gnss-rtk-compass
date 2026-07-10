@@ -39,7 +39,7 @@ constexpr unsigned char kSID = 0xFF;  // sequence id unused
 // versa. Terminated with 0.
 const unsigned long kTransmitPGNs[] = {
     127250UL,  // Vessel Heading
-    127257UL,  // Attitude
+    127251UL,  // Rate of Turn
     129025UL,  // Position, Rapid Update
     129026UL,  // COG & SOG, Rapid Update
     129029UL,  // GNSS Position Data
@@ -66,7 +66,7 @@ double SecondsSinceMidnight(time_t t) { return t % 86400; }
 
 N2kSenders::N2kSenders(uint8_t source_address)
     : heading_([this](float v) { heading_v_.update(v); }),
-      attitude_([this](const AttitudeVector& v) { attitude_v_.update(v); }),
+      rate_of_turn_([this](float v) { rate_of_turn_v_.update(v); }),
       position_([this](const Position& v) { position_v_.update(v); }),
       cog_([this](float v) { cog_v_.update(v); }),
       sog_([this](float v) { sog_v_.update(v); }),
@@ -78,8 +78,7 @@ N2kSenders::N2kSenders(uint8_t source_address)
       }),
       variation_([this](float v) { variation_v_.update(v); }),
       heading_v_(N2kDoubleNA, kExpiry, N2kDoubleNA),
-      attitude_v_(AttitudeVector(N2kDoubleNA, N2kDoubleNA, N2kDoubleNA), kExpiry,
-                  AttitudeVector(N2kDoubleNA, N2kDoubleNA, N2kDoubleNA)),
+      rate_of_turn_v_(N2kDoubleNA, kExpiry, N2kDoubleNA),
       position_v_(Position(N2kDoubleNA, N2kDoubleNA), kExpiry,
                   Position(N2kDoubleNA, N2kDoubleNA)),
       cog_v_(N2kDoubleNA, kExpiry, N2kDoubleNA),
@@ -151,11 +150,11 @@ void N2kSenders::enable_senders() {
     nmea2000->SendMsg(msg);
   });
 
-  // PGN 127257 Attitude (yaw/pitch/roll).
+  // PGN 127251 Rate of Turn. Derived from the heading stream (the UM982 has no
+  // gyro); positive = turning to starboard.
   loop->onRepeat(100, [this]() {
-    AttitudeVector a = attitude_v_.get();
     tN2kMsg msg;
-    SetN2kAttitude(msg, kSID, a.yaw, a.pitch, a.roll);
+    SetN2kRateOfTurn(msg, kSID, rate_of_turn_v_.get());
     nmea2000->SendMsg(msg);
   });
 

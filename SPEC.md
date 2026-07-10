@@ -77,19 +77,19 @@ during implementation.
 | Data | Signal K path |
 |------|---------------|
 | True heading | `navigation.headingTrue` |
+| Rate of turn | `navigation.rateOfTurn` |
 | Position | `navigation.position` |
 | Speed over ground | `navigation.speedOverGround` |
 | Course over ground | `navigation.courseOverGroundTrue` |
 | Magnetic variation | `navigation.magneticVariation` |
 | Fix / baseline quality | `navigation.gnss.methodQuality` (+ satellites, HDOP) |
-| Pitch / roll | `navigation.attitude` |
 
 ### NMEA 2000
 
 | Data | PGN |
 |------|-----|
 | Vessel heading (true) | 127250 |
-| Attitude (yaw/pitch/roll) | 127257 |
+| Rate of turn | 127251 |
 | Position, rapid update | 129025 |
 | COG & SOG, rapid update | 129026 |
 | GNSS position data (incl. fix quality, sats) | 129029 |
@@ -100,6 +100,16 @@ during implementation.
 | Datum (WGS84) | 129044 |
 
 Device uses a unique N2K source address to avoid bus conflicts.
+
+Attitude (pitch/roll) is deliberately not published on either Signal K
+(`navigation.attitude`) or NMEA 2000 (127257): the boat's wind interface carries
+an ICM-20948 IMU whose gyro-fused attitude is more accurate than the GNSS
+baseline solution, so it is the sole attitude source.
+
+Rate of turn, by contrast, IS published (127251 / `navigation.rateOfTurn`). The
+UM982 has no gyro, so it is derived from the true-heading stream as a
+least-squares slope over a ~1 s window. Being derived from absolute heading it
+carries no gyro bias, complementing the wind interface's gyro-based rate.
 
 ## Expected behavior
 

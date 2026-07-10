@@ -278,7 +278,7 @@ dependencies:
     version: 2.0.0
   espressif/lan86xx_common:
     component_hash: 
-      6dcb1be9f43ae940979bd628fa5bee278949b66c545e1fe2321e486102e81026
+      1045dc16e9eaa23c8f94ebd012e4ccc9087e85323c39f870b116391f27196914
     dependencies:
     - name: idf
       require: private
@@ -286,7 +286,7 @@ dependencies:
     source:
       registry_url: https://components.espressif.com
       type: service
-    version: 1.0.0
+    version: 1.0.1
   espressif/libsodium:
     component_hash: 
       39c9dc77d81804d54a539c8f076faed165152be7720ddd0e721acb9daf4aa5af
@@ -300,7 +300,7 @@ dependencies:
     version: 1.0.22
   espressif/mdns:
     component_hash: 
-      291732b5df4d181eb75eba9042799a508c4c124503a0c0573132a0a48d2e3fbe
+      e81ca7a7f53ea34e78274df054da692c272e1315572876b237b1748e267c013b
     dependencies:
     - name: idf
       require: private
@@ -308,7 +308,7 @@ dependencies:
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 1.11.2
+    version: 1.11.3
   espressif/network_provisioning:
     component_hash: 
       ef2e10182fd1861e68b821491916327c25416ca7ae70e5a6e43313dbc71fe993
@@ -371,6 +371,6 @@ direct_dependencies:
 - espressif/rmaker_common
 - idf
 - joltwallet/littlefs
-manifest_hash: a4d0c4036d016bce3d3f3d8952da665b474cc309e6aa3d280d4773a24a0aa4c6
+manifest_hash: d9c3c249211793410557c7e1cccd4125086d87d01d29883aeb2e6924e223f0ef
 target: esp32
 version: 2.0.0
