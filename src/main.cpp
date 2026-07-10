@@ -1,7 +1,7 @@
 // GNSS RTK Compass — UM982 dual-antenna satellite compass on SH-ESP32.
 //
 // Reads the UM982 serial output, derives true heading from the antenna
-// baseline, and publishes heading, attitude, position, speed/course and fix
+// baseline, and publishes heading, rate of turn, position, speed/course and fix
 // quality to both Signal K and NMEA 2000. See SPEC.md.
 //
 // Boot order matters: the UM982 settings (mode, baseline, offset, anti-jam,
@@ -26,6 +26,7 @@
 
 #include "gnhpr_parser.h"
 #include "n2k_senders.h"
+#include "rate_of_turn.h"
 #include "um982_config.h"
 
 using namespace sensesp;
@@ -68,6 +69,10 @@ constexpr uint32_t kUM982BaudRate = 115200;
 
 constexpr uint8_t kN2kSourceAddress = 25;
 
+// Rate-of-turn least-squares window. ~1 s trades a modest lag for a clean slope;
+// the derived rate has no gyro bias but is noisier than a gyro, so it is smoothed.
+constexpr unsigned long kRoTWindowMs = 1000;
+
 // Program-lifetime roots (registered by raw pointer elsewhere).
 std::shared_ptr<NMEA0183IO> nmea_io;
 std::shared_ptr<UM982CommandAckParser> ack_parser;
@@ -83,6 +88,7 @@ std::shared_ptr<N2kSenders> n2k;
 // is too late: they would never be attached to the delta queue, so no deltas are
 // ever sent.
 std::shared_ptr<SKOutputFloat> sk_heading;
+std::shared_ptr<SKOutputFloat> sk_rate_of_turn;
 std::shared_ptr<SKOutputString> sk_heading_quality;
 std::shared_ptr<SKOutputPosition> sk_position;
 std::shared_ptr<SKOutputFloat> sk_sog;
@@ -113,6 +119,8 @@ String TimeToISO8601(const time_t& t) {
 void CreateSKOutputs() {
   sk_heading = std::make_shared<SKOutputFloat>("navigation.headingTrue",
                                                "/SK Path/Heading True");
+  sk_rate_of_turn = std::make_shared<SKOutputFloat>("navigation.rateOfTurn",
+                                                    "/SK Path/Rate of Turn");
   sk_heading_quality = std::make_shared<SKOutputString>(
       "navigation.gnss.headingQuality", "/SK Path/Heading Quality");
   sk_position = std::make_shared<SKOutputPosition>("navigation.position",
@@ -161,6 +169,12 @@ void WireOutputs() {
   hpr->attitude_.connect_to(yaw);
   yaw->connect_to(sk_heading);
   yaw->connect_to(&n2k->heading_);
+
+  // Rate of turn derived from the heading stream (the UM982 has no gyro).
+  auto rate_of_turn = std::make_shared<HeadingRateOfTurn>(kRoTWindowMs);
+  yaw->connect_to(rate_of_turn);
+  rate_of_turn->connect_to(sk_rate_of_turn);
+  rate_of_turn->connect_to(&n2k->rate_of_turn_);
 
   hpr->heading_quality_.connect_to(sk_heading_quality);
 
