@@ -344,3 +344,20 @@ Always filter SK verification by the device's own ws.* source.
   the 0/2π seam, gap longer than the window resets the estimator. Fed from the same
   `yaw` heading stream; outputs to `navigation.rateOfTurn` + N2K PGN 127251 (added
   to the 126464 transmit list, ExpiringValue on kExpiry so it degrades to N/A).
+
+### PR #18 review + fixes (same day)
+
+- 7-persona review (correctness/testing/maintainability/project-standards/api-contract/
+  reliability/adversarial). Attitude removal + RoT contract verified clean. One P1:
+  **adversarial found an empty heading field hangs the device.** ParseFloat writes the
+  kInvalidFloat sentinel (-3.4e38) on an empty field and returns true; gnhpr_parser fired
+  attitude_.set on quality 4/5 regardless, so ~-5.9e36 rad reached the RoT unwrap, where
+  `d -= TWO_PI` is below the double ULP -> infinite loop -> watchdog reset. Reproduced on
+  host, then verified the gate logic before fixing.
+- Fixes: (1) gnhpr_parser guards heading (isfinite && != kInvalidFloat) before publishing --
+  kills the hang AND a pre-existing bug (empty heading was transmitting -5.9e36 to
+  headingTrue / PGN 127250). (2) kMinSamples 2->4 to damp sparse-input slope spikes (P2).
+  (3) doc nits. Deferred to issues #19 (host test env + unit tests) and #20 (expiry/window
+  alignment, sub-window gap damping).
+- Redeployed (espidf OTA) + re-validated: core fresh, RTK fixed, attitude gone, RoT live.
+  Bonus: kMinSamples=4 dropped RoT noise std 0.42->0.14 deg/s (now ~= the wind gyro's 0.17).
