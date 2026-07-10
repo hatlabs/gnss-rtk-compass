@@ -83,7 +83,6 @@ std::shared_ptr<N2kSenders> n2k;
 // is too late: they would never be attached to the delta queue, so no deltas are
 // ever sent.
 std::shared_ptr<SKOutputFloat> sk_heading;
-std::shared_ptr<SKOutputAttitudeVector> sk_attitude;
 std::shared_ptr<SKOutputString> sk_heading_quality;
 std::shared_ptr<SKOutputPosition> sk_position;
 std::shared_ptr<SKOutputFloat> sk_sog;
@@ -114,8 +113,6 @@ String TimeToISO8601(const time_t& t) {
 void CreateSKOutputs() {
   sk_heading = std::make_shared<SKOutputFloat>("navigation.headingTrue",
                                                "/SK Path/Heading True");
-  sk_attitude = std::make_shared<SKOutputAttitudeVector>(
-      "navigation.attitude", "/SK Path/Attitude");
   sk_heading_quality = std::make_shared<SKOutputString>(
       "navigation.gnss.headingQuality", "/SK Path/Heading Quality");
   sk_position = std::make_shared<SKOutputPosition>("navigation.position",
@@ -164,9 +161,6 @@ void WireOutputs() {
   hpr->attitude_.connect_to(yaw);
   yaw->connect_to(sk_heading);
   yaw->connect_to(&n2k->heading_);
-
-  hpr->attitude_.connect_to(sk_attitude);
-  hpr->attitude_.connect_to(&n2k->attitude_);
 
   hpr->heading_quality_.connect_to(sk_heading_quality);
 
