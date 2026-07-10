@@ -313,3 +313,34 @@ Always filter SK verification by the device's own ws.* source.
   `navigation.attitude` SK output, and the now-dead attitude members. The parser's
   attitude_ signal stays — it still feeds heading (yaw → 127250 + headingTrue).
 - Docs (README, SPEC, FIELD_TEST) updated to match. Build: shesp32 SUCCESS.
+
+### Deploy + validation (same day)
+
+- First OTA used `-e shesp32` (arduino) by mistake — device booted the new build
+  but SK went Disconnected/TX 0 (arduino libs ignore sdkconfig.defaults → no
+  dynamic mbedTLS buffer → runs out of memory against the TLS SK server). The
+  mandatory post-update check caught it; refixed with `-e shesp32_espidf`.
+  **Rule (fleet-wide, per user): always flash the `*_espidf` env.**
+- Post-fix validation passed: core data fresh from the compass's own source
+  (RTK fixed, position/COG/SOG/heading ~0 s age), attitude confirmed gone on both
+  channels (compass `gnss-rtk-compass.XX` and N2K `can0.c0789100ffc00001` frozen,
+  wind box still live).
+
+## 2026-07-10 — add rate of turn (127251 / navigation.rateOfTurn)
+
+- User asked to add RoT after all. My earlier objections were both wrong: (1) I
+  fabricated the heading-jitter figure — never measured it; (2) "two senders on
+  one PGN recreates the conflict" is bogus — consumers key on source address /
+  $source, multiple senders is fine (user corrected this).
+- Measured real heading jitter live (RTK fixed, at dock, 30 s over the SK WS
+  stream): heading std 0.49°, differentiated RoT std 0.48°/s raw, 0.19°/s over a
+  1 s window. Note SK only shows heading at ~1.8 Hz (delta throttle); the device
+  parses HPR at 10 Hz (`GPHPR 0.1`), so the on-device RoT sees the full rate.
+- RoT is a MEMS-gyro quantity normally; the wind box gets it from the ICM-20948
+  gyro (NOT the magnetometer — mag calibration is irrelevant to rate). GNSS-heading
+  differentiation is the complementary approach: noisier but bias-free.
+- Implemented `HeadingRateOfTurn` (src/rate_of_turn.h): Transform<float,float>,
+  least-squares slope over a ~1 s window (kRoTWindowMs), heading unwrapped across
+  the 0/2π seam, gap longer than the window resets the estimator. Fed from the same
+  `yaw` heading stream; outputs to `navigation.rateOfTurn` + N2K PGN 127251 (added
+  to the 126464 transmit list, ExpiringValue on kExpiry so it degrades to N/A).
