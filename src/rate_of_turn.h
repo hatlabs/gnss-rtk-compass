@@ -53,6 +53,8 @@ class HeadingRateOfTurn : public Transform<float, float> {
     }
 
     // Least-squares slope of heading (rad) against time (s) = rate of turn.
+    // Sums over the window: st=sum(t), sy=sum(heading), stt=sum(t^2),
+    // sty=sum(t*heading).
     unsigned long t0 = buf_.front().first;
     double n = buf_.size(), st = 0, sy = 0, stt = 0, sty = 0;
     for (const auto& s : buf_) {
@@ -68,9 +70,11 @@ class HeadingRateOfTurn : public Transform<float, float> {
   }
 
  private:
-  // Two samples define a slope; the span guard keeps a bursty pair from
-  // producing a wild finite difference.
-  static constexpr size_t kMinSamples = 2;
+  // A 2-point slope is a raw finite difference that a single noisy heading turns
+  // into a wild spike; requiring several samples lets the least-squares fit
+  // average the noise down. The span guard rejects a too-short (bursty) window.
+  // window_ms_ must exceed kMinSpanMs or the transform never emits.
+  static constexpr size_t kMinSamples = 4;
   static constexpr unsigned long kMinSpanMs = 250;
 
   unsigned long window_ms_;

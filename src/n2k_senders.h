@@ -17,9 +17,9 @@ using namespace sensesp;
  * @brief NMEA 2000 output for the GNSS RTK compass.
  *
  * Initializes the ESP32 CAN/N2K interface and periodically transmits heading,
- * rate of turn, position, COG/SOG and GNSS position data. Inputs arrive through the
- * public LambdaConsumers and expire if they stop updating, so a stale value is
- * sent as "not available" rather than frozen.
+ * rate of turn, position, COG/SOG and GNSS position data. Inputs arrive through
+ * the public LambdaConsumers and expire if they stop updating, so a stale value
+ * is sent as "not available" rather than frozen.
  *
  * Inputs use Signal K SI units: angles in radians, speed in m/s, position in
  * degrees.
