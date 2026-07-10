@@ -82,14 +82,12 @@ during implementation.
 | Course over ground | `navigation.courseOverGroundTrue` |
 | Magnetic variation | `navigation.magneticVariation` |
 | Fix / baseline quality | `navigation.gnss.methodQuality` (+ satellites, HDOP) |
-| Pitch / roll | `navigation.attitude` |
 
 ### NMEA 2000
 
 | Data | PGN |
 |------|-----|
 | Vessel heading (true) | 127250 |
-| Attitude (yaw/pitch/roll) | 127257 |
 | Position, rapid update | 129025 |
 | COG & SOG, rapid update | 129026 |
 | GNSS position data (incl. fix quality, sats) | 129029 |
@@ -100,6 +98,12 @@ during implementation.
 | Datum (WGS84) | 129044 |
 
 Device uses a unique N2K source address to avoid bus conflicts.
+
+Attitude (pitch/roll) is deliberately not published on either Signal K
+(`navigation.attitude`) or NMEA 2000 (127257). The boat's wind interface carries
+an ICM-20948 IMU whose gyro-fused attitude is more accurate than the GNSS
+baseline solution, so it is the sole attitude source. Two devices publishing the
+same attitude PGN would also trip Signal K's device-instance conflict check.
 
 ## Expected behavior
 

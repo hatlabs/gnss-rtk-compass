@@ -297,3 +297,19 @@ with a 180 deg heading offset in the device config.
 API returns the highest-priority $source, NOT necessarily this device. Two wrong
 conclusions (GSV "over-emit", heading "lag") came from reading another source.
 Always filter SK verification by the device's own ws.* source.
+
+## 2026-07-10 — stop publishing attitude (127257 / navigation.attitude)
+
+- Signal K's NMEA Discovery flagged a device-instance conflict: the compass
+  (addr 25) and the wind interface (addr 72) both broadcast PGN 127257 Attitude
+  at device instance 0. Diagnosed the shared PGN as 127257 — the only overlap.
+- Decision (with user): the wind interface's ICM-20948 gyro-fused attitude beats
+  the GNSS baseline solution, so the wind box is the sole attitude source. The
+  compass stops emitting attitude on both channels.
+- Confirmed the compass sends no rate of turn (127251) — only the wind box does —
+  and the UM982 has no gyro (logs enabled are HPR/GGA/RMC/VTG/GSV, all
+  angle/position only), so nothing was lost by dropping attitude.
+- Removed the 127257 sender + PGN from the 126464 transmit list, the
+  `navigation.attitude` SK output, and the now-dead attitude members. The parser's
+  attitude_ signal stays — it still feeds heading (yaw → 127250 + headingTrue).
+- Docs (README, SPEC, FIELD_TEST) updated to match. Build: shesp32 SUCCESS.

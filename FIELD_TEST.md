@@ -52,8 +52,8 @@ The device currently has a **stale Signal K server** set to `oppi4.hal:3000`
 
 - Connect to the device's WiFi AP on first boot (or its web UI on the boat
   network) and set the Signal K server to `halos.hurma`.
-- Then check `navigation.headingTrue`, `navigation.attitude`, and
-  `navigation.gnss.headingQuality` on the dashboard.
+- Then check `navigation.headingTrue` and `navigation.gnss.headingQuality`
+  on the dashboard.
 
 If the boat network isn't reachable in the yard, the **serial output above is
 the primary check** — it needs no network.
@@ -62,4 +62,4 @@ the primary check** — it needs no network.
 
 Without a backbone the CAN driver logs `CANSendFrame - not open` and loops on
 bus errors — expected, harmless. On the backbone it transmits PGNs 127250,
-127257, 129025, 129026, 129029. Verify on a plotter or N2K analyzer.
+129025, 129026, 129029. Verify on a plotter or N2K analyzer.
