@@ -67,8 +67,10 @@ The firmware configures the module on boot so the install is plug-and-play:
   - optional `$GNGSA` / `$GNGSV` for satellite detail.
 - Persist with `SAVECONFIG` (or re-send every boot — decided in planning).
 
-Heading is targeted at roughly 10 Hz; position at ~1–5 Hz. Final rates settled
-during implementation.
+Output rates: heading, position, speed, and course at 10 Hz; satellites, DOP,
+variation, and time at 1 Hz; datum at 0.1 Hz. Speed and course (PGN 129026) run
+at 10 Hz for responsiveness, above the 4 Hz N2K standard; the others follow the
+standard transmit interval for their PGN.
 
 ## Outputs
 

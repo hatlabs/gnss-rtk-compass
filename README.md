@@ -87,8 +87,8 @@ source address.
 
 ### Data outputs
 
-Heading is published at 10 Hz; position, speed, course, and satellite data
-at 1 Hz.
+Heading, position, speed, and course are published at 10 Hz; satellite data at
+1 Hz.
 
 Signal K paths:
 
