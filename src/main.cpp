@@ -143,13 +143,15 @@ void CreateSKOutputs() {
 }
 
 // Enable the NMEA output sentences once the module is configured. Period
-// argument is in seconds (0.1 = 10 Hz).
+// argument is in seconds (0.1 = 10 Hz). Each sentence is output at the N2K
+// transmit rate of the PGN that carries its data (see enable_senders), so the
+// rapid PGNs carry genuinely fresh fixes rather than a repeated slow one.
 void EnableUM982Output() {
-  nmea_io->set("GPHPR 0.1");  // heading/pitch/roll/quality at 10 Hz
-  nmea_io->set("GPGGA 1");    // position, fix quality, satellites at 1 Hz
-  nmea_io->set("GPRMC 1");    // position, SOG, time at 1 Hz
-  nmea_io->set("GPVTG 1");    // course over ground at 1 Hz
-  nmea_io->set("GPGSV 1");    // satellites in view (constellation) at 1 Hz
+  nmea_io->set("GPHPR 0.1");  // heading -> 127250 at 10 Hz
+  nmea_io->set("GPGGA 0.1");  // position -> 129025 at 10 Hz (also 1 Hz GNSS/DOP PGNs)
+  nmea_io->set("GPRMC 0.1");  // SOG -> 129026 at 10 Hz (also 1 Hz time/variation PGNs)
+  nmea_io->set("GPVTG 0.1");  // course over ground -> 129026 at 10 Hz
+  nmea_io->set("GPGSV 1");    // satellites in view -> 129540 at 1 Hz
 }
 
 // Wire the data path. Called only after all UM982 settings are ACK'd, so

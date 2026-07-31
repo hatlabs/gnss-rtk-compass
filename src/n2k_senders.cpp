@@ -158,16 +158,17 @@ void N2kSenders::enable_senders() {
     nmea2000->SendMsg(msg);
   });
 
-  // PGN 129025 Position, Rapid Update.
-  loop->onRepeat(250, [this]() {
+  // PGN 129025 Position, Rapid Update, at the NMEA 2000 standard 100 ms (10 Hz).
+  loop->onRepeat(100, [this]() {
     Position p = position_v_.get();
     tN2kMsg msg;
     SetN2kPGN129025(msg, p.latitude, p.longitude);
     nmea2000->SendMsg(msg);
   });
 
-  // PGN 129026 COG & SOG, Rapid Update.
-  loop->onRepeat(250, [this]() {
+  // PGN 129026 COG & SOG, Rapid Update, at 100 ms (10 Hz) to match position --
+  // above the 250 ms N2K standard, for COG/SOG as responsive as position.
+  loop->onRepeat(100, [this]() {
     tN2kMsg msg;
     SetN2kCOGSOGRapid(msg, kSID, N2khr_true, cog_v_.get(), sog_v_.get());
     nmea2000->SendMsg(msg);
@@ -246,7 +247,8 @@ void N2kSenders::enable_senders() {
   // referenced to). The library has no setter, so hand-build it: Local Datum,
   // three zero deltas (no offset from the reference), Reference Datum. Datum IDs
   // are IHO S-60 codes -- "W84" is WGS84; the 4th byte is the subdivision (none).
-  loop->onRepeat(1000, [this]() {
+  // 10 s is the NMEA 2000 standard interval for this quasi-static PGN.
+  loop->onRepeat(10000, [this]() {
     tN2kMsg msg;
     msg.SetPGN(129044L);
     msg.Priority = 6;
