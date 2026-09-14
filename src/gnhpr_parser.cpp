@@ -5,6 +5,7 @@
 #include <cmath>
 #include <functional>
 
+#include "sensesp/types/nullable.h"
 #include "sensesp_nmea0183/sentence_parser/field_parsers.h"
 
 namespace gnss_rtk_compass {
@@ -57,11 +58,11 @@ bool UnicoreHPRSentenceParser::parse_fields(const char* field_strings,
   // The baseline solution yields a usable heading when fixed (4) or float (5).
   // Quality is published regardless so a degraded solution is visible.
   // Guard the heading: the HPR heading field is optional, so an empty field
-  // parses to the kInvalidFloat sentinel (and a malformed one to NaN).
-  // Publishing that as a heading would emit a nonsense value to Signal K /
-  // PGN 127250 and feed a huge magnitude into the rate-of-turn unwrap.
-  bool heading_valid =
-      std::isfinite(heading_deg) && heading_deg != kInvalidFloat;
+  // parses to the Nullable<float> invalid sentinel (and a malformed one to
+  // NaN). Publishing that as a heading would emit a nonsense value to Signal K
+  // / PGN 127250 and feed a huge magnitude into the rate-of-turn unwrap.
+  bool heading_valid = std::isfinite(heading_deg) &&
+                       heading_deg != sensesp::Nullable<float>::invalid();
   if ((quality == 4 || quality == 5) && heading_valid) {
     attitude_.set(AttitudeVector(roll_deg * DEG_TO_RAD, pitch_deg * DEG_TO_RAD,
                                  heading_deg * DEG_TO_RAD));
